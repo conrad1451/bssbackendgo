@@ -18,9 +18,10 @@ import (
 )
 
 // User represents a user record in the database.
-type CHECKPOINT struct {
+type Checkpoint struct {
 	ID        int    `json:"id"`
 	Username string `json:"user_name"`
+	CheckpointData string `json:"checkpoint_data"`
 }
 
 var db *sql.DB
@@ -51,11 +52,11 @@ func main() {
 	router := mux.NewRouter()
 
 	// Define API routes
-	router.HandleFunc("/godbstudents", createStudent).Methods("POST")
-	router.HandleFunc("/godbstudents/{id}", getStudent).Methods("GET")
-	router.HandleFunc("/godbstudents", getAllgodbstudents).Methods("GET")
-	router.HandleFunc("/godbstudents/{id}", updateStudent).Methods("PUT")
-	router.HandleFunc("/godbstudents/{id}", deleteStudent).Methods("DELETE")
+	router.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
+	router.HandleFunc("/gamecheckpoints/{id}", getCheckpoint).Methods("GET")
+	router.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
+	router.HandleFunc("/gamecheckpoints/{id}", getCheckpoints).Methods("PUT")
+	router.HandleFunc("/gamecheckpoints/{id}", deleteCheckpoint).Methods("DELETE")
 
 	// --- CORS Setup ---
 	// Create a list of allowed origins (e.g., your front-end URL)
@@ -83,109 +84,109 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, corsRouter))
 }
 
-// createStudent handles POST requests to create a new student record.
-func createStudent(w http.ResponseWriter, r *http.Request) {
-	var student Student
-	err := json.NewDecoder(r.Body).Decode(&student)
+// createCheckpoint handles POST requests to create a new myCheckpoint record.
+func createCheckpoint(w http.ResponseWriter, r *http.Request) {
+	var myCheckpoint Checkpoint
+	err := json.NewDecoder(r.Body).Decode(&myCheckpoint)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	query := `INSERT INTO godbstudents (first_name, last_name, email, major) VALUES ($1, $2, $3, $4) RETURNING id`
-	err = db.QueryRow(query, student.FirstName, student.LastName, student.Email, student.Major).Scan(&student.ID)
+	query := `INSERT INTO gamecheckpoints (user_name, checkpoint_data) VALUES ($1, $2) RETURNING id`
+	err = db.QueryRow(query, myCheckpoint.Username, myCheckpoint.CheckpointData).Scan(&myCheckpoint.ID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating student: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error creating myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(student)
+	json.NewEncoder(w).Encode(myCheckpoint)
 }
 
-// getStudent handles GET requests to retrieve a single student by ID.
-func getStudent(w http.ResponseWriter, r *http.Request) {
+// getCheckpoint handles GET requests to retrieve a single myCheckpoint by ID.
+func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
-		http.Error(w, "Invalid student ID", http.StatusBadRequest)
+		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
 	}
 
-	var student Student
-	query := `SELECT id, first_name, last_name, email, major FROM godbstudents WHERE id = $1`
+	var myCheckpoint Checkpoint
+	query := `SELECT id, user_name, checkpoint_data FROM gamecheckpoints WHERE id = $1`
 	row := db.QueryRow(query, id)
 
-	err = row.Scan(&student.ID, &student.FirstName, &student.LastName, &student.Email, &student.Major)
+	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData)
 	if err == sql.ErrNoRows {
-		http.Error(w, "Student not found", http.StatusNotFound)
+		http.Error(w, "Checkpoint not found", http.StatusNotFound)
 		return
 	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving student: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(student)
+	json.NewEncoder(w).Encode(myCheckpoint)
 }
 
-// getAllgodbstudents handles GET requests to retrieve all student records.
-func getAllgodbstudents(w http.ResponseWriter, r *http.Request) {
-	var godbstudents []Student
-	query := `SELECT id, first_name, last_name, email, major FROM godbstudents ORDER BY id`
+// getAllCheckpoints handles GET requests to retrieve all myCheckpoint records.
+func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
+	var gamecheckpoints []Checkpoint
+	query := `SELECT id, user_name, checkpoint_data FROM gamecheckpoints ORDER BY id`
 	rows, err := db.Query(query)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving godbstudents: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error retrieving gamecheckpoints: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var student Student
-		err := rows.Scan(&student.ID, &student.FirstName, &student.LastName, &student.Email, &student.Major)
+		var myCheckpoint Checkpoint
+		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData)
 		if err != nil {
-			log.Printf("Error scanning student row: %v", err)
+			log.Printf("Error scanning myCheckpoint row: %v", err)
 			continue
 		}
-		godbstudents = append(godbstudents, student)
+		gamecheckpoints = append(gamecheckpoints, myCheckpoint)
 	}
 
 	if err = rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error iterating over student rows: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(godbstudents)
+	json.NewEncoder(w).Encode(gamecheckpoints)
 }
 
-// updateStudent handles PUT requests to update an existing student record.
-func updateStudent(w http.ResponseWriter, r *http.Request) {
+// getCheckpoints handles PUT requests to update an existing myCheckpoint record.
+func getCheckpoints(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
-		http.Error(w, "Invalid student ID", http.StatusBadRequest)
+		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
 	}
 
-	var student Student
-	err = json.NewDecoder(r.Body).Decode(&student)
+	var myCheckpoint Checkpoint
+	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if student.ID != 0 && student.ID != id {
+	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
 		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
 		return
 	}
-	student.ID = id
-
-	query := `UPDATE godbstudents SET first_name = $1, last_name = $2, email = $3, major = $4 WHERE id = $5`
-	result, err := db.Exec(query, student.FirstName, student.LastName, student.Email, student.Major, student.ID)
+	myCheckpoint.ID = id
+ 
+	query := `UPDATE gamecheckpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
+	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error updating student: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -195,27 +196,27 @@ func updateStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Student not found or no changes made", http.StatusNotFound)
+		http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Student updated successfully"})
+	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
 }
 
-// deleteStudent handles DELETE requests to delete a student record by ID.
-func deleteStudent(w http.ResponseWriter, r *http.Request) {
+// deleteCheckpoint handles DELETE requests to delete a myCheckpoint record by ID.
+func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
-		http.Error(w, "Invalid student ID", http.StatusBadRequest)
+		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
 	}
 
-	query := `DELETE FROM godbstudents WHERE id = $1`
+	query := `DELETE FROM gamecheckpoints WHERE id = $1`
 	result, err := db.Exec(query, id)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error deleting student: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -225,10 +226,10 @@ func deleteStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Student not found", http.StatusNotFound)
+		http.Error(w, "Checkpoint not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Student deleted successfully"})
+	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint deleted successfully"})
 }
