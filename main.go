@@ -58,10 +58,16 @@ func main() {
 	router.HandleFunc("/gamecheckpoints/{id}", getCheckpoints).Methods("PUT")
 	router.HandleFunc("/gamecheckpoints/{id}", deleteCheckpoint).Methods("DELETE")
 
+	theOrigins := []string{
+		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
+		"https://studentfrontendreact.vercel.app",
+		"http://localhost:5173", 
+		"http://localhost:5174",
+	}
+
 	// --- CORS Setup ---
 	// Create a list of allowed origins (e.g., your front-end URL)
-	// For production, you should replace "*" with your specific front-end domain.
-	allowedOrigins := handlers.AllowedOrigins([]string{"*"})
+ 	allowedOrigins := handlers.AllowedOrigins(theOrigins)
 	
 	// Create a list of allowed methods (GET, POST, etc.)
 	allowedMethods := handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"})
