@@ -32,6 +32,8 @@ var db *sql.DB
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_DB_CONNECTION"}
 
 func main() {
+	fmt.Println("Please update something!")
+
 	// Initialize database connection
 	var err error
 	dbConnStr := os.Getenv(listOfDBConnections[1])
