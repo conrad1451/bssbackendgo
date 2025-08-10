@@ -24,9 +24,12 @@ type Checkpoint struct {
 	CheckpointData string `json:"checkpoint_data"`
 }
 
-var db *sql.DB
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS, AVIEN_DB_CONNECTION"}
+
+
+var db *sql.DB
+  
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_DB_CONNECTION"}
 
 func main() {
 	// Initialize database connection
