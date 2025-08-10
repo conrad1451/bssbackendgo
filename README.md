@@ -1,6 +1,6 @@
 # bssbackendgo
 
-A backend server for the bss game.
+A backend server for the bss game. Written in Go (GoLang).
 
 ## To run the API server:
 
