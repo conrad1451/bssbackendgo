@@ -26,17 +26,16 @@ type Checkpoint struct {
 
 
 
-
 var db *sql.DB
   
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_DB_CONNECTION"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION"}
 
 func main() {
 	fmt.Println("Please update something!")
 
 	// Initialize database connection
 	var err error
-	dbConnStr := os.Getenv(listOfDBConnections[1])
+	dbConnStr := os.Getenv(listOfDBConnections[0])
 	if dbConnStr == "" {
 		log.Fatal("DATABASE_URL environment variable not set.")
 	}
