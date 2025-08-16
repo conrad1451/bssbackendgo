@@ -103,7 +103,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `INSERT INTO gamecheckpoints (user_name, checkpoint_data) VALUES ($1, $2) RETURNING id`
+	query := `INSERT INTO gameplay_checkpoints (user_name, checkpoint_data) VALUES ($1, $2) RETURNING id`
 	err = db.QueryRow(query, myCheckpoint.Username, myCheckpoint.CheckpointData).Scan(&myCheckpoint.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error creating myCheckpoint: %v", err), http.StatusInternalServerError)
@@ -125,7 +125,7 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint Checkpoint
-	query := `SELECT id, user_name, checkpoint_data FROM gamecheckpoints WHERE id = $1`
+	query := `SELECT id, user_name, checkpoint_data FROM gameplay_checkpoints WHERE id = $1`
 	row := db.QueryRow(query, id)
 
 	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData)
@@ -143,11 +143,11 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 
 // getAllCheckpoints handles GET requests to retrieve all myCheckpoint records.
 func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
-	var gamecheckpoints []Checkpoint
-	query := `SELECT id, user_name, checkpoint_data FROM gamecheckpoints ORDER BY id`
+	var gameplayCheckpoints []Checkpoint
+	query := `SELECT id, user_name, checkpoint_data FROM gameplay_checkpoints ORDER BY id`
 	rows, err := db.Query(query)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving gamecheckpoints: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -159,7 +159,7 @@ func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Error scanning myCheckpoint row: %v", err)
 			continue
 		}
-		gamecheckpoints = append(gamecheckpoints, myCheckpoint)
+		gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
 	}
 
 	if err = rows.Err(); err != nil {
@@ -168,7 +168,7 @@ func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(gamecheckpoints)
+	json.NewEncoder(w).Encode(gameplayCheckpoints)
 }
 
 // getCheckpoints handles PUT requests to update an existing myCheckpoint record.
@@ -193,7 +193,7 @@ func getCheckpoints(w http.ResponseWriter, r *http.Request) {
 	}
 	myCheckpoint.ID = id
  
-	query := `UPDATE gamecheckpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
+	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
 	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
@@ -223,7 +223,7 @@ func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `DELETE FROM gamecheckpoints WHERE id = $1`
+	query := `DELETE FROM gameplay_checkpoints WHERE id = $1`
 	result, err := db.Exec(query, id)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
