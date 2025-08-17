@@ -19,7 +19,7 @@ import (
 )
 
 // Checkpoint represents a user record in the database.
-// 🟢 NEW: Added CreatedAt and LastEditedAt to the struct
+// CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
 type Checkpoint struct {
 	ID             int       `json:"id"`
 	Username       string    `json:"user_name"`
@@ -59,7 +59,7 @@ func main() {
 	router.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
 	router.HandleFunc("/gamecheckpoints/{id}", getCheckpoint).Methods("GET")
 	router.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
-	// 🟢 CORRECTED: Changed handler function name and route for PUT request
+	// CHQ: Gemini AI changed handler function name and route for PUT request
 	router.HandleFunc("/gamecheckpoints/{id}", updateCheckpoint).Methods("PUT")
 	router.HandleFunc("/gamecheckpoints/{id}", deleteCheckpoint).Methods("DELETE")
 
@@ -103,7 +103,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-    // We do not need to insert the timestamp columns manually because the database handles them
+    // Database automatically handles ID and timestamp columns
 	query := `INSERT INTO gameplay_checkpoints (user_name, checkpoint_data) VALUES ($1, $2) RETURNING id`
 	err = db.QueryRow(query, myCheckpoint.Username, myCheckpoint.CheckpointData).Scan(&myCheckpoint.ID)
 	if err != nil {
@@ -126,10 +126,10 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint Checkpoint
-	// 🟢 CORRECTED: Added the two timestamp columns to the SELECT query
+	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
 	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE id = $1`
 	row := db.QueryRow(query, id)
-    // 🟢 CORRECTED: Added the two timestamp fields to the Scan function
+    // CHQ: Gemini AI Added the two timestamp fields to the Scan function
 	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Checkpoint not found", http.StatusNotFound)
@@ -146,7 +146,7 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 // getAllCheckpoints handles GET requests to retrieve all myCheckpoint records.
 func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 	var gameplayCheckpoints []Checkpoint
-	// 🟢 CORRECTED: Added the two timestamp columns to the SELECT query
+	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
 	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
 	rows, err := db.Query(query)
 	if err != nil {
@@ -157,7 +157,7 @@ func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var myCheckpoint Checkpoint
-		// 🟢 CORRECTED: Added the two timestamp fields to the Scan function
+		// CHQ: Gemini AI added the two timestamp fields to the Scan function
 		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
 		if err != nil {
 			log.Printf("Error scanning myCheckpoint row: %v", err)
@@ -175,7 +175,7 @@ func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(gameplayCheckpoints)
 }
 
-// 🟢 RENAMED: from getCheckpoints to updateCheckpoint
+// CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
 func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -196,7 +196,7 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	myCheckpoint.ID = id
-	// We no longer need to update the last_edited_at column manually. The database trigger handles it automatically
+    // Database automatically updates last_edited_at columns
 	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
 	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
