@@ -82,8 +82,7 @@ func main() {
 	}
 	fmt.Println("Successfully connected to the database!")
 
-
-	projectID := os.Getenv("DESCOPE_PROJECT_ID")
+	projectID := os.Getenv("DESCOPE_PROJECT_BSS_ID")
 	if projectID == "" {
 		log.Fatal("DESCOPE_PROJECT_ID environment variable not set.")
 	}
