@@ -45,23 +45,6 @@ const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "GOOGLE_VM_HOSTED_SQL"}
 
-
-// faviconHandler serves the favicon.ico file.
-func faviconHandler(w http.ResponseWriter, r *http.Request) {
-    // Open the favicon file
-    favicon, err := os.ReadFile("./static/calculator.ico")
-    if err != nil {
-        http.NotFound(w, r)
-        return
-    }
-
-    // Set the Content-Type header
-    w.Header().Set("Content-Type", "image/x-icon")
-    
-    // Write the file content to the response
-    w.Write(favicon)
-}
-
 func main() {
 	// Initialize database connection
 	var err error
@@ -145,6 +128,22 @@ func main() {
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, "This is the server for the student records app. It's written in Go (aka GoLang).")
+}
+
+// faviconHandler serves the favicon.ico file.
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+    // Open the favicon file
+    favicon, err := os.ReadFile("./static/calculator.ico")
+    if err != nil {
+        http.NotFound(w, r)
+        return
+    }
+
+    // Set the Content-Type header
+    w.Header().Set("Content-Type", "image/x-icon")
+    
+    // Write the file content to the response
+    w.Write(favicon)
 }
 
 // CHQ: Gemini AI created function
