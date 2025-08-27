@@ -29,7 +29,8 @@ type Checkpoint struct {
 	CheckpointData string    `json:"checkpoint_data"`
 	CreatedAt      time.Time `json:"created_at"`
 	LastEditedAt   time.Time `json:"last_edited_at"`
-	playerID	   string    `json:"player_id"`
+	PlayerID       sql.NullString `json:"player_id"` // Use sql.NullString for nullable columns
+	// playerID	   string    `json:"player_id"`
 }
 
 var db *sql.DB
@@ -45,22 +46,6 @@ const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "GOOGLE_VM_HOSTED_SQL"}
 
-
-// faviconHandler serves the favicon.ico file.
-func faviconHandler(w http.ResponseWriter, r *http.Request) {
-    // Open the favicon file
-    favicon, err := os.ReadFile("./static/calculator.ico")
-    if err != nil {
-        http.NotFound(w, r)
-        return
-    }
-
-    // Set the Content-Type header
-    w.Header().Set("Content-Type", "image/x-icon")
-    
-    // Write the file content to the response
-    w.Write(favicon)
-}
 
 func main() {
 	// Initialize database connection
@@ -144,7 +129,23 @@ func main() {
 // helloHandler is the function that will be executed for requests to the "/" route.
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, "This is the server for the student records app. It's written in Go (aka GoLang).")
+	fmt.Fprint(w, "This is the server for the Bee Swarm Simulator (bss) game - at least the version made by Conrad. It's written in Go (aka GoLang).")
+}
+
+// faviconHandler serves the favicon.ico file.
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+    // Open the favicon file
+    favicon, err := os.ReadFile("./static/beehive1.ico")
+    if err != nil {
+        http.NotFound(w, r)
+        return
+    }
+
+    // Set the Content-Type header
+    w.Header().Set("Content-Type", "image/x-icon")
+    
+    // Write the file content to the response
+    w.Write(favicon)
 }
 
 // CHQ: Gemini AI created function
@@ -271,7 +272,10 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 
 	var myCheckpoint Checkpoint
 	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE id = $1`
+	// query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE id = $1`
+	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints ORDER BY id`
+	// query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
+	
 	row := db.QueryRow(query, id)
     // CHQ: Gemini AI Added the two timestamp fields to the Scan function
 	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
@@ -344,7 +348,9 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 	for rows.Next() {
 		var myCheckpoint Checkpoint
 		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
+		// err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
+		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
+		
 		if err != nil {
 			log.Printf("Error scanning myCheckpoint row: %v", err)
 			continue
