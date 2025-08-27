@@ -312,6 +312,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
 func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
@@ -322,14 +323,33 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	// query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE id = $1`
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints WHERE id = $1`
-	// query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
+	var userName string // New variable to hold the user_name from the join
+
+	query := `
+		SELECT 
+			g.id, 
+			u.user_name, 
+			g.checkpoint_data, 
+			g.created_at, 
+			g.last_edited_at, 
+			g.player_id 
+		FROM 
+			gameplay_checkpoints g 
+		JOIN 
+			users u ON g.user_id = u.user_id 
+		WHERE 
+			g.id = $1`
 
 	row := db.QueryRow(query, id)
-	// CHQ: Gemini AI Added the two timestamp fields to the Scan function
-	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
+ 	err = row.Scan(
+		&myCheckpoint.ID,
+		&userName, // Scan into a separate variable
+		&myCheckpoint.CheckpointData,
+		&myCheckpoint.CreatedAt,
+		&myCheckpoint.LastEditedAt,
+		&myCheckpoint.PlayerID,
+	)
+
 	if err == sql.ErrNoRows {
 		http.Error(w, "Checkpoint not found", http.StatusNotFound)
 		return
@@ -337,6 +357,9 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
 	}
+	
+	// Update the Checkpoint struct with the user_name from the join
+	myCheckpoint.Username = userName
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(myCheckpoint)
@@ -358,11 +381,33 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint Checkpoint
+	var userName string // New variable to hold the user_name from the join
 	// Ensure the checkpoint belongs to the authenticated player.
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints WHERE id = $1 AND player_id = $2`
-	row := db.QueryRow(query, id, playerID)
+	query := `
+		SELECT 
+			g.id, 
+			u.user_name, 
+			g.checkpoint_data, 
+			g.created_at, 
+			g.last_edited_at, 
+			g.player_id 
+		FROM 
+			gameplay_checkpoints g 
+		JOIN 
+			users u ON g.user_id = u.user_id 
+		WHERE 
+			g.id = $1 AND g.player_id = $2` 
 
-	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
+	row := db.QueryRow(query, id, playerID)
+ 	err = row.Scan(
+		&myCheckpoint.ID,
+		&userName, // Scan into a separate variable
+		&myCheckpoint.CheckpointData,
+		&myCheckpoint.CreatedAt,
+		&myCheckpoint.LastEditedAt,
+		&myCheckpoint.PlayerID,
+	)
+	
 	if err == sql.ErrNoRows {
 		http.Error(w, "myCheckpoint not found or not owned by this player", http.StatusNotFound)
 		return
@@ -383,40 +428,66 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
 // getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
 func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
-	var gameplayCheckpoints []Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints ORDER BY id`
-	rows, err := db.Query(query)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
+    var gameplayCheckpoints []Checkpoint
+    
+    // The query now joins with the users table to get the user_name
+    query := `
+        SELECT 
+            g.id, 
+            u.user_name, 
+            g.checkpoint_data, 
+            g.created_at, 
+            g.last_edited_at, 
+            g.player_id 
+        FROM 
+            gameplay_checkpoints g 
+        JOIN 
+            users u ON g.user_id = u.user_id 
+        ORDER BY g.id`
+    
+    rows, err := db.Query(query)
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
 
-	for rows.Next() {
-		var myCheckpoint Checkpoint
-		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		// err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
+    for rows.Next() {
+        var myCheckpoint Checkpoint
+        var userName string // New variable to hold the user_name from the join
 
-		if err != nil {
-			log.Printf("Error scanning myCheckpoint row: %v", err)
-			continue
-		}
-		gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-	}
+        err := rows.Scan(
+            &myCheckpoint.ID,
+            &userName, // Scan into a separate variable
+            &myCheckpoint.CheckpointData,
+            &myCheckpoint.CreatedAt,
+            &myCheckpoint.LastEditedAt,
+            &myCheckpoint.PlayerID,
+        )
+        
+        if err != nil {
+            log.Printf("Error scanning myCheckpoint row: %v", err)
+            continue
+        }
+        
+        // Update the Checkpoint struct with the user_name from the join
+        myCheckpoint.Username = userName
+        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
+    }
 
-	if err = rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
-		return
-	}
+    if err = rows.Err(); err != nil {
+        http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(gameplayCheckpoints)
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(gameplayCheckpoints)
 }
 
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
 func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
@@ -425,25 +496,53 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var gameplayCheckpoints []Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints WHERE player_id = $1 ORDER BY id`
-	rows, err := db.Query(query, playerID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var myCheckpoint Checkpoint
-		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
-		if err != nil {
-			log.Printf("Error scanning myCheckpoint row: %v", err)
-			continue
-		}
-		gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-	}
+    // The query now joins with the users table to get the user_name
+    query := `
+        SELECT 
+            g.id, 
+            u.user_name, 
+            g.checkpoint_data, 
+            g.created_at, 
+            g.last_edited_at, 
+            g.player_id 
+        FROM 
+            gameplay_checkpoints g 
+        JOIN 
+            users u ON g.user_id = u.user_id 
+		WHERE
+			g.player_id = $1 
+        ORDER BY g.id`
+    
+    rows, err := db.Query(query, playerID)
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var myCheckpoint Checkpoint
+        var userName string // New variable to hold the user_name from the join
+
+        err := rows.Scan(
+            &myCheckpoint.ID,
+            &userName, // Scan into a separate variable
+            &myCheckpoint.CheckpointData,
+            &myCheckpoint.CreatedAt,
+            &myCheckpoint.LastEditedAt,
+            &myCheckpoint.PlayerID,
+        )
+        
+        if err != nil {
+            log.Printf("Error scanning myCheckpoint row: %v", err)
+            continue
+        }
+        
+        // Update the Checkpoint struct with the user_name from the join
+        myCheckpoint.Username = userName
+        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
+    }
 
 	if err = rows.Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
@@ -484,8 +583,8 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	myCheckpoint.ID = id
 	// Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
-	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE id = $2`
+	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
@@ -532,8 +631,8 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 	myCheckpoint.ID = id
 	// Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3 AND player_id = $4`
-	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE id = $2 AND player_id = $3`
+	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
@@ -545,7 +644,7 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
+		http.Error(w, "Checkpoint not found or not owned by this player", http.StatusNotFound)
 		return
 	}
 
