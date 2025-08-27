@@ -27,7 +27,8 @@ type Checkpoint struct {
 	CheckpointData string    `json:"checkpoint_data"`
 	CreatedAt      time.Time `json:"created_at"`
 	LastEditedAt   time.Time `json:"last_edited_at"`
-	playerID	   string    `json:"player_id"`
+	PlayerID       sql.NullString `json:"player_id"` // Use sql.NullString for nullable columns
+	// playerID	   string    `json:"player_id"`
 }
 
 var db *sql.DB
@@ -186,7 +187,8 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request){
 func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 	var gameplayCheckpoints []Checkpoint
 	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
+	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints ORDER BY id`
+	// query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
 	rows, err := db.Query(query)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
@@ -197,7 +199,10 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 	for rows.Next() {
 		var myCheckpoint Checkpoint
 		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
+
+		// err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
+		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.PlayerID)
+		
 		if err != nil {
 			log.Printf("Error scanning myCheckpoint row: %v", err)
 			continue
