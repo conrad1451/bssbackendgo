@@ -199,26 +199,50 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// CHQ: Gemini AI refactored function to account for new user table 
+//      access in the database
 func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
+    var playerCheckpoint Checkpoint
+    err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
 
-	var playerCheckpoint Checkpoint
-	err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	// The original query was missing player_id. It's added now.
-	query := `INSERT INTO gameplay_checkpoints (user_name, checkpoint_data, player_id) VALUES ($1, $2, $3) RETURNING id`
-	// The original code was missing a value for player_id in QueryRow.
-	err = db.QueryRow(query, playerCheckpoint.Username, playerCheckpoint.CheckpointData, playerCheckpoint.PlayerID).Scan(&playerCheckpoint.ID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating player checkpoint: %v", err), http.StatusInternalServerError)
-		return
-	}
+    // 1. Check if the user exists in the 'users' table.
+    var userID int
+    err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", playerCheckpoint.Username).Scan(&userID)
+    
+    if err == sql.ErrNoRows {
+        // User does not exist, so create a new user first.
+        insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
+        err = db.QueryRow(insertUserQuery, playerCheckpoint.Username).Scan(&userID)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
+            return
+        }
+    } else if err != nil {
+        http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(playerCheckpoint)
+    // 2. Now that we have a valid userID, insert the checkpoint data.
+    // The query now inserts into user_id and checkpoint_data.
+    query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING id`
+    
+    var newCheckpointID int
+    err = db.QueryRow(query, userID, playerCheckpoint.CheckpointData).Scan(&newCheckpointID)
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Error creating player checkpoint: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    // Update the returned struct with the new ID.
+    playerCheckpoint.ID = newCheckpointID
+    
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(playerCheckpoint)
 }
 
 // CHQ: Gemini AI refactored function to account for new user table 
