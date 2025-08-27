@@ -221,62 +221,63 @@ func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(playerCheckpoint)
 }
 
+// CHQ: Gemini AI refactored function to account for new user table 
+//      access in the database
 func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
-	}
+    playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+    if !ok || playerID == "" {
+        http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+        return
+    }
 
-	var requestBody struct {
-		Username       string `json:"user_name"`
-		CheckpointData string `json:"checkpoint_data"`
-	}
-	err := json.NewDecoder(r.Body).Decode(&requestBody)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+    var requestBody struct {
+        Username       string `json:"user_name"`
+        CheckpointData string `json:"checkpoint_data"`
+    }
+    err := json.NewDecoder(r.Body).Decode(&requestBody)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
 
-	// 1. Check if the user exists in the 'users' table.
-	var userID int
-	err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", requestBody.Username).Scan(&userID)
+    // 1. Check if the user exists and get their user_id.
+    var userID int
+    err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", requestBody.Username).Scan(&userID)
+    if err == sql.ErrNoRows {
+        // User does not exist, so create a new user first.
+        insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
+        err = db.QueryRow(insertUserQuery, requestBody.Username).Scan(&userID)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
+            return
+        }
+    } else if err != nil {
+        http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
+        return
+    }
 
-	if err == sql.ErrNoRows {
-		// User does not exist, so create a new user first.
-		insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
-		err = db.QueryRow(insertUserQuery, requestBody.Username).Scan(&userID)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
-			return
-		}
-	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
-		return
-	}
+    // 2. Now that we have a valid userID, insert the checkpoint data.
+    insertCheckpointQuery := `
+        INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) 
+        VALUES ($1, $2) RETURNING id`
 
-	// 2. Now that we have a valid userID, insert the checkpoint data.
-	insertCheckpointQuery := `
-        INSERT INTO gameplay_checkpoints (user_name, checkpoint_data, user_id) 
-        VALUES ($1, $2, $3) RETURNING id`
+    var newCheckpointID int
+    err = db.QueryRow(insertCheckpointQuery, userID, requestBody.CheckpointData).Scan(&newCheckpointID)
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Error creating checkpoint: %v", err), http.StatusInternalServerError)
+        return
+    }
 
-	var newCheckpointID int
-	err = db.QueryRow(insertCheckpointQuery, requestBody.Username, requestBody.CheckpointData, userID).Scan(&newCheckpointID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating checkpoint: %v", err), http.StatusInternalServerError)
-		return
-	}
+    // Return the newly created checkpoint data.
+    responseCheckpoint := Checkpoint{
+        ID:             newCheckpointID,
+        Username:       requestBody.Username,
+        CheckpointData: requestBody.CheckpointData,
+    }
 
-	// Return the newly created checkpoint data.
-	responseCheckpoint := Checkpoint{
-		ID:             newCheckpointID,
-		Username:       requestBody.Username,
-		CheckpointData: requestBody.CheckpointData,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(responseCheckpoint)
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(responseCheckpoint)
 }
 
 func createCheckpoint(w http.ResponseWriter, r *http.Request) {
