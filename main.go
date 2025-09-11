@@ -265,13 +265,16 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
 
     // 1. Check if the user exists and get their user_id.
-    var userID int
-    err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", requestBody.Username).Scan(&userID)
-    if err == sql.ErrNoRows {
-        // User does not exist, so create a new user first.
-        insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
-        err = db.QueryRow(insertUserQuery, requestBody.Username).Scan(&userID)
-        if err != nil {
+	var userID int
+	err = db.QueryRow("SELECT user_id FROM users WHERE player_id = $1", playerID).Scan(&userID)
+
+	if err == sql.ErrNoRows {
+		// User does not exist, so create a new user first.
+		insertUserQuery := "INSERT INTO users (user_name, player_id) VALUES ($1, $2) RETURNING user_id"
+		err = db.QueryRow(insertUserQuery, requestBody.Username, playerID).Scan(&userID)
+
+		
+		if err != nil {
             http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
             return
         }
@@ -282,12 +285,13 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 
     // 2. Now that we have a valid userID, insert the checkpoint data.
     insertCheckpointQuery := `
-        INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) 
-        VALUES ($1, $2) RETURNING id`
+		INSERT INTO gameplay_checkpoints (user_id, checkpoint_data, player_id) 
+		VALUES ($1, $2, $3) RETURNING id`
 
     var newCheckpointID int
-    err = db.QueryRow(insertCheckpointQuery, userID, requestBody.CheckpointData).Scan(&newCheckpointID)
-    if err != nil {
+	// Pass the retrieved userID, checkpoint data, and the playerID from the token
+	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.CheckpointData, playerID).Scan(&newCheckpointID)
+	if err != nil {
         http.Error(w, fmt.Sprintf("Error creating checkpoint: %v", err), http.StatusInternalServerError)
         return
     }
