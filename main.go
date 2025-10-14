@@ -203,13 +203,48 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// In a real-world app, you would extract this from custom claims in the token.
 		playerID := userID
 
-		// Store the user ID and teacher ID in the request's context
+		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
+        // This is where a successfully authenticated user is automatically added to the players table.
+        // It's called after validation but before processing the request, ensuring the player ID is in the DB.
+        insertPlayerIntoDB(playerID)
+
+		// Store the user ID and player ID in the request's context
 		ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
 		ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
 
 		next.ServeHTTP(w, r.WithContext(ctxWithIDs))
 	})
 }
+
+func insertPlayerIntoDB(playerID string) {
+	// query := `
+	// 	INSERT INTO teachers (teacher_id) -- Changed 'the_real_teachers' to 'teachers'
+	// 	VALUES ($1)
+	// 	ON CONFLICT (teacher_id) DO NOTHING
+	// `
+	// // Use context for database operation, though for a simple insert, context.Background() is often fine.
+	// // Using db.Exec() without context here for simplicity, but in a production environment,
+	// // consider using db.ExecContext(ctx, query, teacherID) for better cancellation/timeout handling.
+	// _, err := db.Exec(query, teacherID)
+
+	query := `
+	INSERT INTO players (player_id, first_name, last_name, email) 
+	VALUES ($1, $2, $3, $4)
+	ON CONFLICT (player_id) DO NOTHING
+`	
+	// Use context for database operation, though for a simple insert, context.Background() is often fine.
+	// Using db.Exec() without context here for simplicity, but in a production environment,
+	// consider using db.ExecContext(ctx, query, teacherID) for better cancellation/timeout handling.
+	_, err := db.Exec(query, playerID, "First name", "last name", "email")
+	if err != nil {
+		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
+		// The middleware should not fail the request just because the background
+		// operation failed, unless the database error is critical.
+		log.Printf("AUTOMATIC REGISTRATION FAILED for teacher ID %s: %v", playerID, err)
+	} else {
+		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Teacher ID %s ensured in teachers table.", playerID) // Updated log message
+	}
+} 
 
 // CHQ: Gemini AI refactored function to account for new user table 
 //      access in the database
