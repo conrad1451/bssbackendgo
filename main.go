@@ -23,10 +23,11 @@ import (
 
 // Checkpoint represents a checkpoint in the database.
 type Checkpoint struct {
-    ID        int       `json:"id"`
+    ID        int       `json:"checkpoint_id"`
     UserID    string    `json:"user_id"`
     Title     string    `json:"title"`
-    Data      []byte    `json:"data"` // Use []byte for JSONB
+    Data      string    `json:"data"` // Use []byte for JSONB
+	// Data      []byte    `json:"data"` // Use []byte for JSONB
     CreatedAt time.Time `json:"created_at"`
     UpdatedAt time.Time `json:"updated_at"`
 }
@@ -34,7 +35,7 @@ type Checkpoint struct {
 // OldCheckpoint represents a user record in the database.
 // CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
 type OldCheckpoint struct {
-	ID             int            `json:"id"`
+	ID             int            `json:"checkpoint_id"`
 	Username       string         `json:"user_name"`
 	CheckpointData string         `json:"checkpoint_data"`
 	CreatedAt      time.Time      `json:"created_at"`
@@ -60,7 +61,7 @@ type contextKey string
 const contextKeyUserID contextKey = "userID"
 const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "GOOGLE_VM_HOSTED_SQL"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS"}
 
 func main() {
 	// Initialize database connection
@@ -103,11 +104,11 @@ func main() {
 	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
 	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
 	protectedRoutes.HandleFunc("/usercreate", createUser).Methods("POST")
-	protectedRoutes.HandleFunc("/gamecheckpoints/{id}", getCheckpoint).Methods("GET")
+	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
-	// protectedRoutes.HandleFunc("/gamecheckpoints/{id}", updateCheckpoint).Methods("PUT")
-	// protectedRoutes.HandleFunc("/gamecheckpoints/{id}", updateCheckpointALT).Methods("PATCH")
-	// protectedRoutes.HandleFunc("/gamecheckpoints/{id}", deleteCheckpoint).Methods("DELETE")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", deleteCheckpoint).Methods("DELETE")
 
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
@@ -239,7 +240,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 
 //     // 2. Now that we have a valid userID, insert the oldcheckpoint data.
 //     // The query now inserts into user_id and checkpoint_data.
-//     query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING id`
+//     query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING checkpoint_id`
     
 //     var newCheckpointID int
 //     err = db.QueryRow(query, userID, playerCheckpoint.CheckpointData).Scan(&newCheckpointID)
@@ -297,7 +298,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     // 2. Now that we have a valid userID, insert the oldcheckpoint data.
     insertCheckpointQuery := `
 		INSERT INTO gameplay_checkpoints (user_id, checkpoint_data, player_id) 
-		VALUES ($1, $2, $3) RETURNING id`
+		VALUES ($1, $2, $3) RETURNING checkpoint_id`
 
     var newCheckpointID int
 	// Pass the retrieved userID, oldcheckpoint data, and the playerID from the token
@@ -332,7 +333,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
@@ -343,7 +344,7 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT 
-			g.id, 
+			g.checkpoint_id, 
 			u.user_name, 
 			g.checkpoint_data, 
 			g.created_at, 
@@ -354,9 +355,9 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		JOIN 
 			users u ON g.user_id = u.user_id 
 		WHERE 
-			g.id = $1`
+			g.checkpoint_id = $1`
 
-	row := db.QueryRow(query, id)
+	row := db.QueryRow(query, checkpoint_id)
  	err = row.Scan(
 		&myCheckpoint.ID,
 		&userName, // Scan into a separate variable
@@ -390,7 +391,7 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid player ID", http.StatusBadRequest)
 		return
@@ -401,7 +402,7 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	// Ensure the oldcheckpoint belongs to the authenticated player.
 	query := `
 		SELECT 
-			g.id, 
+			g.checkpoint_id, 
 			u.user_name, 
 			g.checkpoint_data, 
 			g.created_at, 
@@ -412,9 +413,9 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		JOIN 
 			users u ON g.user_id = u.user_id 
 		WHERE 
-			g.id = $1 AND g.player_id = $2` 
+			g.checkpoint_id = $1 AND g.player_id = $2` 
 
-	row := db.QueryRow(query, id, playerID)
+	row := db.QueryRow(query, checkpoint_id, playerID)
  	err = row.Scan(
 		&myCheckpoint.ID,
 		&userName, // Scan into a separate variable
@@ -451,7 +452,7 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request) {
 
 	// declared and not used: idcompilerUnusedVar
 	// vars := mux.Vars(r)
-	// id, err := strconv.Atoi(vars["id"])
+	// checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	// if err != nil {
 	// 	http.Error(w, "Invalid player ID", http.StatusBadRequest)
 	// 	return
@@ -483,7 +484,7 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
     // The query now joins with the users table to get the user_name
     query := `
         SELECT 
-            g.id, 
+            g.checkpoint_id, 
             u.user_name, 
             g.checkpoint_data, 
             g.created_at, 
@@ -493,7 +494,7 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
             gameplay_checkpoints g 
         JOIN 
             users u ON g.user_id = u.user_id 
-        ORDER BY g.id`
+        ORDER BY g.checkpoint_id`
     
     rows, err := db.Query(query)
     if err != nil {
@@ -547,7 +548,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
     // The query now joins with the users table to get the user_name
     query := `
         SELECT 
-            g.id, 
+            g.checkpoint_id, 
             u.user_name, 
             g.checkpoint_data, 
             g.created_at, 
@@ -559,7 +560,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
             users u ON g.user_id = u.user_id 
 		WHERE
 			g.player_id = $1 
-        ORDER BY g.id`
+        ORDER BY g.checkpoint_id`
     
     rows, err := db.Query(query, playerID)
     if err != nil {
@@ -611,7 +612,7 @@ func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
 func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
@@ -624,13 +625,13 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
+	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
 		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
 		return
 	}
-	myCheckpoint.ID = id
+	myCheckpoint.ID = checkpoint_id
 	// Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE id = $2`
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
@@ -659,7 +660,7 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
@@ -672,13 +673,13 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
+	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
 		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
 		return
 	}
-	myCheckpoint.ID = id
+	myCheckpoint.ID = checkpoint_id
 	// Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE id = $2 AND player_id = $3`
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2 AND player_id = $3`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
@@ -710,7 +711,7 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
 // func updateCheckpointALT(w http.ResponseWriter, r *http.Request) {
 //  vars := mux.Vars(r)
-//  id, err := strconv.Atoi(vars["id"])
+//  id, err := strconv.Atoi(vars["checkpoint_id"])
 //  if err != nil {
 //      http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 //      return
@@ -723,13 +724,13 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 //      return
 //  }
 
-//  if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
+//  if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
 //      http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
 //      return
 //  }
-//  myCheckpoint.ID = id
+//  myCheckpoint.ID = checkpoint_id
 //     // Database automatically updates last_edited_at columns
-//  query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
+//  query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE checkpoint_id = $3`
 //  result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
 //  if err != nil {
 //      http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
@@ -753,14 +754,14 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 // deleteCheckpointAsAdmin handles DELETE requests to delete a myCheckpoint record by ID.
 func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
 	}
 
-	query := `DELETE FROM gameplay_checkpoints WHERE id = $1`
-	result, err := db.Exec(query, id)
+	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1`
+	result, err := db.Exec(query, checkpoint_id)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
@@ -788,14 +789,14 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
 		return
 	}
 
-	query := `DELETE FROM gameplay_checkpoints WHERE id = $1 AND player_id = $2`
-	result, err := db.Exec(query, id, playerID)
+	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1 AND player_id = $2`
+	result, err := db.Exec(query, checkpoint_id, playerID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
 		return
@@ -833,7 +834,7 @@ func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
 func StoreNewUser(userID string) error {
 	// The SQL INSERT statement. We use a parameterized query ($1)
 	// to prevent SQL injection attacks.
-	query := "INSERT INTO game_users (id) VALUES ($1)"
+	query := "INSERT INTO game_users (checkpoint_id) VALUES ($1)"
 
 	// Execute the SQL statement. The Exec method is used for
 	// commands that do not return a result set, such as INSERT, UPDATE, or DELETE.
@@ -881,7 +882,7 @@ func GetUserCheckpoints(userID string) ([]Checkpoint, error) {
 
     // 2. Query the database for all checkpoints belonging to the given user ID.
     // The query uses a parameterized statement ($1) to prevent SQL injection.
-    rows, err := db.Query("SELECT id, title, data, created_at, updated_at FROM game_checkpoints WHERE user_id = $1", userID)
+    rows, err := db.Query("SELECT checkpoint_id, title, data, created_at, updated_at FROM game_checkpoints WHERE user_id = $1", userID)
     if err != nil {
         return nil, fmt.Errorf("failed to query game_checkpoints for user %s: %w", userID, err)
     }
