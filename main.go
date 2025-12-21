@@ -61,12 +61,12 @@ type contextKey string
 const contextKeyUserID contextKey = "userID"
 const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
 func main() {
 	// Initialize database connection
 	var err error
-	dbConnStr := os.Getenv(listOfDBConnections[3])
+	dbConnStr := os.Getenv(listOfDBConnections[4])
 	if dbConnStr == "" {
 		log.Fatal("DATABASE_URL environment variable not set.")
 	}
