@@ -217,25 +217,19 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 }
 
 func insertPlayerIntoDB(playerID string) {
-	// query := `
-	// 	INSERT INTO teachers (teacher_id) -- Changed 'the_real_teachers' to 'teachers'
-	// 	VALUES ($1)
-	// 	ON CONFLICT (teacher_id) DO NOTHING
-	// `
-	// // Use context for database operation, though for a simple insert, context.Background() is often fine.
 	// // Using db.Exec() without context here for simplicity, but in a production environment,
-	// // consider using db.ExecContext(ctx, query, teacherID) for better cancellation/timeout handling.
-	// _, err := db.Exec(query, teacherID)
+	// // consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+	// _, err := db.Exec(query, playerID)
 
 	query := `
-	INSERT INTO players (player_id, first_name, last_name, email) 
-	VALUES ($1, $2, $3, $4)
+	INSERT INTO players (player_id, user_name, email) 
+	VALUES ($1, $2, $3)
 	ON CONFLICT (player_id) DO NOTHING
 `	
 	// Use context for database operation, though for a simple insert, context.Background() is often fine.
 	// Using db.Exec() without context here for simplicity, but in a production environment,
-	// consider using db.ExecContext(ctx, query, teacherID) for better cancellation/timeout handling.
-	_, err := db.Exec(query, playerID, "First name", "last name", "email")
+	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+	_, err := db.Exec(query, playerID, "username", "email")
 	if err != nil {
 		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
 		// The middleware should not fail the request just because the background
