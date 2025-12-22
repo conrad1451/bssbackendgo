@@ -58,6 +58,8 @@ var isAnAdmin bool
 // Define a custom key type to avoid collisions
 type contextKey string
 
+const contextKeyIsAdmin contextKey = "isAdmin"
+
 const contextKeyUserID contextKey = "userID"
 const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
@@ -195,6 +197,9 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			http.Error(w, "Unauthorized: Invalid session token", http.StatusUnauthorized)
 			return
 		}
+		
+		isAdmin := descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"})
+
 		if descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"}) {
 			isAnAdmin = true
 		} else {
@@ -222,8 +227,10 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// Store the user ID and player ID in the request's context
 		ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
 		ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
+        ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
 
-		next.ServeHTTP(w, r.WithContext(ctxWithIDs))
+		// next.ServeHTTP(w, r.WithContext(ctxWithIDs))
+		next.ServeHTTP(w, r.WithContext(ctxWithAdminStatus))
 	})
 }
 
@@ -361,12 +368,19 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 }
 
 func createCheckpoint(w http.ResponseWriter, r *http.Request) {
-	// if isAnAdmin {
-	// 	createCheckpointAsAdmin(w, r)
-	// } else {
-	// 	createCheckpointAsPlayer(w, r)
-	// }
-	createCheckpointAsPlayer(w, r)
+ 
+	isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+        return
+    }
+
+	if (isAdmin) {
+		// createCheckpointAsAdmin(w, r)
+	} else {
+		createCheckpointAsPlayer(w, r)
+	}
 }
 
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
@@ -477,8 +491,24 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(myCheckpoint)
 }
 
+func getCheckpoint(w http.ResponseWriter, r *http.Request){	
+	// Retrieve isAdmin from context
+    isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+        return
+    }
+
+	if (isAdmin) {
+		getCheckpointAsAdmin(w, r)
+	} else {
+		getCheckpointAsPlayer(w, r)
+	}
+}
+
 // CHQ: Gemini AI debugged this function
-func getCheckpoint(w http.ResponseWriter, r *http.Request) {
+func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 	// if isAnAdmin {
 	// 	getCheckpointAsAdmin(w, r)
 	// } else {
