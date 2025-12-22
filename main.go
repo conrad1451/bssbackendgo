@@ -63,24 +63,35 @@ const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
+func mustGetEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("FATAL: required environment variable %s is not set", key)
+	}
+	return val
+}
+
+
 func main() {
 	// Initialize database connection
+	connStr := mustGetEnv(listOfDBConnections[4])
+
 	var err error
-	dbConnStr := os.Getenv(listOfDBConnections[4])
-	if dbConnStr == "" {
-		log.Fatal("DATABASE_URL environment variable not set.")
-	}
+	db, err = sql.Open("postgres", connStr)
 
-	db, err = sql.Open("postgres", dbConnStr)
 	if err != nil {
-		log.Fatalf("Error opening database: %v", err)
-	}
-	defer db.Close()
+		log.Fatalf("Failed to open database: %v", err)
+	} 
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatalf("Error connecting to the database: %v", err)
+	if err = db.Ping(); err != nil {
+		log.Fatalf("Database ping failed: %v", err)
 	}
+  	// defer db.Close()
+
+	// err = db.Ping()
+	// if err != nil {
+	// 	log.Fatalf("Error connecting to the database: %v", err)
+	// }
 	fmt.Println("Successfully connected to the database!")
 
 	projectID := os.Getenv("DESCOPE_PROJECT_ID")
