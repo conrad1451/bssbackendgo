@@ -673,8 +673,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(gameplayCheckpoints)
 }
 
-func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
-	if isAnAdmin {
+func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
 	// CHQ: Gemini AI changed fetching global vatiable to retrieving variable from context
 
 	// Retrieve isAdmin from context
