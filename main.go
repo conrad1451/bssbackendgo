@@ -123,6 +123,8 @@ func main() {
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", deleteCheckpoint).Methods("DELETE")
 
+	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints,).Methods("GET")
+
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
 		"https://studentfrontendreact.vercel.app",
@@ -673,6 +675,17 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 
 func getAllCheckpoints(w http.ResponseWriter, r *http.Request) {
 	if isAnAdmin {
+	// CHQ: Gemini AI changed fetching global vatiable to retrieving variable from context
+
+	// Retrieve isAdmin from context
+    isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+        return
+    }
+
+	if (isAdmin) {
 		getAllCheckpointsAsAdmin(w)
 	} else {
 		getAllCheckpointsAsPlayer(w, r)
