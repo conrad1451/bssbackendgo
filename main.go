@@ -32,6 +32,13 @@ type Checkpoint struct {
     UpdatedAt time.Time `json:"updated_at"`
 }
 
+type UpdatePlayerRequest struct {
+    // FirstName string `json:"first_name"`
+    // LastName  string `json:"last_name"`
+	Username string `json:"user_name"`
+    Email     string `json:"email"`
+}
+
 // OldCheckpoint represents a user record in the database.
 // CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
 type OldCheckpoint struct {
@@ -689,6 +696,71 @@ func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
 	} else {
 		getAllCheckpointsAsPlayer(w, r)
 	}
+}
+
+func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
+    // 1. Authorization: Get the ID of the logged-in teacher from the context.
+    playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+    if !ok || playerID == "" {
+        // This should not happen if middleware succeeded, but good to check.
+        log.Printf("Forbidden: Player ID not found in session context.")
+        http.Error(w, "Forbidden: Player ID not found in session", http.StatusForbidden)
+        return
+    }
+
+    // 2. Decode Request Body: CRITICAL FIX
+    var req UpdatePlayerRequest // Use the struct with correct JSON tags
+    err := json.NewDecoder(r.Body).Decode(&req)
+    if err != nil {
+        log.Printf("Invalid request body or JSON format: %v", err)
+        http.Error(w, fmt.Sprintf("Invalid request body or JSON format: %v", err), http.StatusBadRequest)
+        return
+    }
+    
+    // 3. Database Update: Update the teacher profile identified by the authenticated playerID.
+    // The query and arguments were correct, but the data source (req) must be correct.
+    // CHQ: Gemini AI fixed the line below for correct name for id field
+	// FIX: Changed "id" to "teacher_id" to match the actual database column name.
+    query := `UPDATE players SET first_name = $1, last_name = $2, email = $3 WHERE teacher_id = $4`
+    
+    // Note: We are using the fields from the unmarshalled 'req' struct.
+    // Ensure db is available in scope.
+    result, err := db.Exec(query, req.Username, req.Email, playerID)
+
+    if err != nil {
+        log.Printf("Error executing SQL update for teacher ID %s: %v", playerID, err)
+        // Ensure the error response is JSON for the frontend to handle gracefully.
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusInternalServerError)
+        json.NewEncoder(w).Encode(SuccessResponse{
+            Message: fmt.Sprintf("Error updating profile in database: %v", err),
+        })
+        return
+    }
+
+    // 4. Check Rows Affected
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        log.Printf("Error checking rows affected for teacher ID %s: %v", playerID, err)
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusInternalServerError)
+        json.NewEncoder(w).Encode(SuccessResponse{
+            Message: "Error confirming profile update.",
+        })
+        return
+    }
+    if rowsAffected == 0 {
+        log.Printf("Update attempted for teacher ID %s, but 0 rows affected. Profile not found?", playerID)
+        http.Error(w, "Authenticated teacher profile not found or no changes made", http.StatusNotFound)
+        return
+    }
+
+    // 5. Success Response
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(SuccessResponse{
+        Message: "Teacher updated successfully",
+    })
 }
 
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
