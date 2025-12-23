@@ -60,8 +60,6 @@ type User struct {
 var db *sql.DB
 var descopeClient *client.DescopeClient
 
-var isAnAdmin bool
-
 // Define a custom key type to avoid collisions
 type contextKey string
 
@@ -207,13 +205,10 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		
-		isAdmin := descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"})
+		// isAdmin := descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"})
+		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
+		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 
-		if descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"}) {
-			isAnAdmin = true
-		} else {
-			isAnAdmin = false
-		}
 
 		userID := token.ID
 		// userRole := token.GetTenants()
@@ -234,12 +229,17 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
         insertPlayerIntoDB(playerID)
 
 		// Store the user ID and player ID in the request's context
-		ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
-		ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
-        ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
+		// ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
+		// ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
+        // ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
+		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
+		ctx = context.WithValue(ctx, contextKeyUserID, userID)
+		ctx = context.WithValue(ctx, contextKeyPlayerID, playerID)
 
+		next.ServeHTTP(w, r.WithContext(ctx))
 		// next.ServeHTTP(w, r.WithContext(ctxWithIDs))
-		next.ServeHTTP(w, r.WithContext(ctxWithAdminStatus))
+		next.ServeHTTP(w, r.WithContext(ctx))
+
 	})
 }
 
@@ -318,7 +318,13 @@ func insertPlayerIntoDB(playerID string) {
 func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
     if !ok || playerID == "" {
-        http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Role not determined",
+		})
+
         return
     }
 
@@ -328,7 +334,12 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
     err := json.NewDecoder(r.Body).Decode(&requestBody)
     if err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
+        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Role not determined",
+		})
         return
     }
 
@@ -518,11 +529,8 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request){
 
 // CHQ: Gemini AI debugged this function
 func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
-	// if isAnAdmin {
-	// 	getCheckpointAsAdmin(w, r)
-	// } else {
-	// 	getCheckpointAsPlayer(w, r)
-	// }
+	// isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
 		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
@@ -855,7 +863,10 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
-	if isAnAdmin {
+	isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	// if isAnAdmin {
+
+	if isAdmin {
 		updateCheckpointAsAdmin(w, r)
 	} else {
 		updateCheckpointAsPlayer(w, r)
@@ -971,7 +982,9 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
-	if isAnAdmin {
+	isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	// if isAnAdmin {
+	if isAdmin {
 		deleteCheckpointAsAdmin(w, r)
 	} else {
 		deleteCheckpointAsPlayer(w, r)
