@@ -121,7 +121,7 @@ func main() {
 	protectedRoutes := router.PathPrefix("/api").Subrouter()
 	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
 	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
-	protectedRoutes.HandleFunc("/usercreate", createUser).Methods("POST")
+	// protectedRoutes.HandleFunc("/usercreate", createUser).Methods("POST")
 	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
@@ -998,48 +998,48 @@ func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
 // CHQ: Gemini AI created function
 // StoreNewUser takes a Descope user ID and inserts it into the `users` table.
 // It returns an error if the insertion fails.
-func StoreNewUser(userID string) error {
-	// The SQL INSERT statement. We use a parameterized query ($1)
-	// to prevent SQL injection attacks.
-	query := "INSERT INTO game_users (checkpoint_id) VALUES ($1)"
+// func StoreNewUser(userID string) error {
+// 	// The SQL INSERT statement. We use a parameterized query ($1)
+// 	// to prevent SQL injection attacks.
+// 	query := "INSERT INTO game_users (checkpoint_id) VALUES ($1)"
 
-	// Execute the SQL statement. The Exec method is used for
-	// commands that do not return a result set, such as INSERT, UPDATE, or DELETE.
-	_, err := db.Exec(query, userID)
-	if err != nil {
-		// Return a wrapped error to provide more context about the failure.
-		return fmt.Errorf("failed to insert new user with ID %s: %w", userID, err)
-	}
+// 	// Execute the SQL statement. The Exec method is used for
+// 	// commands that do not return a result set, such as INSERT, UPDATE, or DELETE.
+// 	_, err := db.Exec(query, userID)
+// 	if err != nil {
+// 		// Return a wrapped error to provide more context about the failure.
+// 		return fmt.Errorf("failed to insert new user with ID %s: %w", userID, err)
+// 	}
 
-	// If the insertion was successful, return nil for the error.
-	fmt.Printf("Successfully stored new user with ID: %s\n", userID)
-	return nil
-}
+// 	// If the insertion was successful, return nil for the error.
+// 	fmt.Printf("Successfully stored new user with ID: %s\n", userID)
+// 	return nil
+// }
 
 // CHQ: Gemini AI edited this 
 // Example function to retrieve a user's checkpoints
-func createUser(w http.ResponseWriter, r *http.Request) {
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
-	}
+// func createUser(w http.ResponseWriter, r *http.Request) {
+// 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+// 	if !ok || playerID == "" {
+// 		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+// 		return
+// 	}
 
-	// Correctly handle the error returned by StoreNewUser.
-	err := StoreNewUser(playerID)
-	if err != nil {
-		// Log the error and return an appropriate internal server error status.
-		http.Error(w, fmt.Sprintf("Error storing user: %v", err), http.StatusInternalServerError)
-		return
-	}
+// 	// Correctly handle the error returned by StoreNewUser.
+// 	err := StoreNewUser(playerID)
+// 	if err != nil {
+// 		// Log the error and return an appropriate internal server error status.
+// 		http.Error(w, fmt.Sprintf("Error storing user: %v", err), http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Prepare a success response.
-	response := map[string]string{"message": "User created successfully", "userId": playerID}
+// 	// Prepare a success response.
+// 	response := map[string]string{"message": "User created successfully", "userId": playerID}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
-}
+// 	w.Header().Set("Content-Type", "application/json")
+// 	w.WriteHeader(http.StatusCreated)
+// 	json.NewEncoder(w).Encode(response)
+// }
 
 // CHQ: Gemini AI created function
 // Example function to retrieve a user's checkpoints
