@@ -87,9 +87,17 @@ func mustGetEnv(key string) string {
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error": msg,
+	_ = json.NewEncoder(w).Encode(SuccessResponse{
+		Success: false,
+		Message: msg,
 	})
+}
+
+
+func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 
@@ -268,14 +276,22 @@ func insertPlayerIntoDB(playerID string) {
 	// Use context for database operation, though for a simple insert, context.Background() is often fine.
 	// Using db.Exec() without context here for simplicity, but in a production environment,
 	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
-	_, err := db.Exec(query, playerID, "username", "email")
+	// _, err := db.Exec(query, playerID, "username", "email")
+	_, err := db.Exec(
+		query,
+		playerID,
+		playerID,
+		playerID+"@example.com",
+	)
+
+
 	if err != nil {
 		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
 		// The middleware should not fail the request just because the background
 		// operation failed, unless the database error is critical.
-		log.Printf("AUTOMATIC REGISTRATION FAILED for teacher ID %s: %v", playerID, err)
+		log.Printf("AUTOMATIC REGISTRATION FAILED for Player ID %s: %v", playerID, err)
 	} else {
-		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Teacher ID %s ensured in teachers table.", playerID) // Updated log message
+		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Player ID %s ensured in players table.", playerID)
 	}
 } 
 
@@ -340,7 +356,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
     err := json.NewDecoder(r.Body).Decode(&requestBody)
     if err != nil {
-		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON request body")
         return
     }
 
@@ -355,13 +371,15 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 
 		
 		if err != nil {
-			writeJSONError (w, http.StatusInternalServerError, fmt.Sprintf("Error creating user: %v", err))
-            return
+		log.Printf("DB error creating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+		return
         }
     } else if err != nil {
 		log.Printf("Error creating checkpoint: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking for existing user: %v", err))
-        return
+		log.Printf("DB error checking for existing user: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
     }
 
     // 2. Now that we have a valid userID, insert the oldcheckpoint data.
@@ -471,7 +489,7 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid player ID")
+		writeJSONError(w, http.StatusBadRequest, "Invalid checkpoint ID")
 		return
 	}
 
@@ -622,7 +640,8 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
     }
 
     if err = rows.Err(); err != nil {
-        writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err))
+		log.Printf("DB error iterating over checkpoint rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
         return
     }
 
@@ -689,7 +708,8 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
 
 	if err = rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err))
+		log.Printf("DB error iterating over checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -716,7 +736,7 @@ func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
 }
 
 func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
-    // 1. Authorization: Get the ID of the logged-in teacher from the context.
+    // 1. Authorization: Get the ID of the logged-in player from the context.
     playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
     if !ok || playerID == "" {
         // This should not happen if middleware succeeded, but good to check.
@@ -726,17 +746,21 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
 
     // 2. Decode Request Body: CRITICAL FIX
     var req UpdatePlayerRequest // Use the struct with correct JSON tags
-    err := json.NewDecoder(r.Body).Decode(&req)
+    // err := json.NewDecoder(r.Body).Decode(&req)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&req)
+
     if err != nil {
-        log.Printf("Invalid request body or JSON format: %v", err)
-        writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body or JSON format: %v", err))
-        return
+ 		log.Printf("Invalid request body or JSON format: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body or JSON format") 
+		return
     }
     
-    // 3. Database Update: Update the teacher profile identified by the authenticated playerID.
+    // 3. Database Update: Update the player profile identified by the authenticated playerID.
     // The query and arguments were correct, but the data source (req) must be correct.
     // CHQ: Gemini AI fixed the line below for correct name for id field
-	// FIX: Changed "id" to "teacher_id" to match the actual database column name.
+	// FIX: Changed "id" to "player_id" to match the actual database column name.
 
 	// CHQ: Gemini AI corrected query
 	query := `UPDATE players SET user_name = $1, email = $2 WHERE player_id = $3`    
@@ -745,23 +769,24 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     result, err := db.Exec(query, req.Username, req.Email, playerID)
 
     if err != nil {
-        log.Printf("Error executing SQL update for teacher ID %s: %v", playerID, err)
+        log.Printf("Error executing SQL update for player ID %s: %v", playerID, err)
         // Ensure the error response is JSON for the frontend to handle gracefully.
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error updating profile in database: %v", err))
-        return 
+		log.Printf("DB error updating player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return 
     }
 
     // 4. Check Rows Affected
     rowsAffected, err := result.RowsAffected()
     if err != nil {
-        log.Printf("Error checking rows affected for teacher ID %s: %v", playerID, err)
+        log.Printf("Error checking rows affected for player ID %s: %v", playerID, err)
 
 		writeJSONError(w, http.StatusInternalServerError, "Error confirming profile update.")
         return
     }
     if rowsAffected == 0 {
-        log.Printf("Update attempted for teacher ID %s, but 0 rows affected. Profile not found?", playerID)
-        writeJSONError(w, http.StatusNotFound, "Authenticated teacher profile not found or no changes made")
+        log.Printf("Update attempted for player ID %s, but 0 rows affected. Profile not found?", playerID)
+        writeJSONError(w, http.StatusNotFound, "Authenticated player profile not found or no changes made")
         return
     }
 
@@ -784,9 +809,15 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint OldCheckpoint
-	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&myCheckpoint)
+
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		log.Printf("Invalid request body: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -799,13 +830,15 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError,  fmt.Sprintf("Error updating myCheckpoint: %v", err) )
+		log.Printf("DB error updating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError,  fmt.Sprintf("Error checking rows affected: %v", err) )
+		log.Printf("DB error checking affected rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rowsAffected == 0 {
@@ -836,9 +869,14 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var myCheckpoint OldCheckpoint
-	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&myCheckpoint)
+
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		log.Printf("Invalid request body: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body") 
 		return
 	}
 
@@ -850,15 +888,17 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	// Database automatically updates last_edited_at columns
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2 AND player_id = $3`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error updating myCheckpoint: %v", err))
-		return
+	if err != nil { 
+		log.Printf("DB error updating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+ 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
-		return
+		log.Printf("DB error checking affected rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
 	}
 	if rowsAffected == 0 {
 		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found or not owned by this player")
@@ -939,13 +979,15 @@ func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1`
 	result, err := db.Exec(query, checkpoint_id)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error deleting myCheckpoint: %v", err))
+		log.Printf("DB error deleting checkpoint for player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
+		log.Printf("DB error checking rows affected: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rowsAffected == 0 {
@@ -956,7 +998,7 @@ func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SuccessResponse{
     Success: true,
-    Message: "OldCheckpoint updated successfully",
+    Message: "OldCheckpoint deleted successfully",
 })
 }
 
@@ -977,14 +1019,16 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1 AND player_id = $2`
 	result, err := db.Exec(query, checkpoint_id, playerID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error deleting myCheckpoint: %v", err))
+		log.Printf("DB error deleting checkpoint for player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
-		return
+		log.Printf("DB error checking rows affected: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
 	}
 	if rowsAffected == 0 {
 		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
@@ -995,7 +1039,7 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	
 	json.NewEncoder(w).Encode(SuccessResponse{
     	Success: true,
-    	Message: "OldCheckpoint updated successfully",
+		Message: "OldCheckpoint deleted successfully",
 	})
 }
 
