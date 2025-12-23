@@ -729,8 +729,9 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     // The query and arguments were correct, but the data source (req) must be correct.
     // CHQ: Gemini AI fixed the line below for correct name for id field
 	// FIX: Changed "id" to "teacher_id" to match the actual database column name.
-    query := `UPDATE players SET first_name = $1, last_name = $2, email = $3 WHERE teacher_id = $4`
-    
+
+	// CHQ: Gemini AI corrected query
+	query := `UPDATE players SET user_name = $1, email = $2 WHERE player_id = $3`    
     // Note: We are using the fields from the unmarshalled 'req' struct.
     // Ensure db is available in scope.
     result, err := db.Exec(query, req.Username, req.Email, playerID)
