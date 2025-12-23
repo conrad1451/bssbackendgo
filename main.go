@@ -84,6 +84,14 @@ func mustGetEnv(key string) string {
 	return val
 }
 
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": msg,
+	})
+}
+
 
 func main() {
 	// Initialize database connection
@@ -197,8 +205,8 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionToken := r.Header.Get("Authorization")
 		if sessionToken == "" {
-			http.Error(w, "Unauthorized: No session token provided", http.StatusUnauthorized)
-			return
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: No session token provided")
+ 			return
 		}
 
 		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ")
@@ -207,7 +215,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		authorized, token, err := descopeClient.Auth.ValidateSessionWithToken(ctx, sessionToken)
 		if err != nil || !authorized {
 			log.Printf("Session validation failed: %v", err)
-			http.Error(w, "Unauthorized: Invalid session token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: Invalid session token" )
 			return
 		}
 		
@@ -221,7 +229,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// userRole := token.GetTenantValue()
 		// userRole := token.GetTenants()
 		if userID == "" {
-			http.Error(w, "Unauthorized: User ID not found in token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: User ID not found in token") 
 			return
 		}
 
@@ -322,14 +330,8 @@ func insertPlayerIntoDB(playerID string) {
 func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
     if !ok || playerID == "" {
-        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
-
-        return
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
+		return
     }
 
     var requestBody struct {
@@ -338,12 +340,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
     err := json.NewDecoder(r.Body).Decode(&requestBody)
     if err != nil {
-        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Role not determined",
-		})
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
         return
     }
 
@@ -358,11 +355,12 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 
 		
 		if err != nil {
-            http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
+			writeJSONError (w, http.StatusInternalServerError, fmt.Sprintf("Error creating user: %v", err))
             return
         }
     } else if err != nil {
-        http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
+		log.Printf("Error creating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking for existing user: %v", err))
         return
     }
 
@@ -375,7 +373,8 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	// Pass the retrieved userID, oldcheckpoint data, and the playerID from the token
 	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.CheckpointData, playerID).Scan(&newCheckpointID)
 	if err != nil {
-        http.Error(w, fmt.Sprintf("Error creating oldcheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("Error creating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Error creating checkpoint")
         return
     }
 
@@ -396,13 +395,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 	isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Role not determined",
-		})
-
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Role not determined") 
         return
     }
 
@@ -419,7 +412,7 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
@@ -452,10 +445,11 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err == sql.ErrNoRows {
-		http.Error(w, "OldCheckpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
 		return
 	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	
@@ -469,21 +463,15 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 // getStudent handles GET requests to retrieve a single student by ID, but also checks for ownership.
 func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
-
+	if !ok || playerID == "" { 
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
         return
 	}
 
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid player ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid player ID")
 		return
 	}
 
@@ -516,10 +504,11 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	)
 	
 	if err == sql.ErrNoRows {
-		http.Error(w, "myCheckpoint not found or not owned by this player", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "myCheckpoint not found or not owned by this player")
 		return
 	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -532,12 +521,7 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request){
     isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Role not determined",
-		})
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
         return
     }
 
@@ -554,12 +538,7 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 	
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
         return		 
 	}
 
@@ -575,8 +554,9 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 	thoseCheckpoints, err := GetUserCheckpoints(playerID)
     if err != nil {
         // If an error occurred in the database function, handle it here.
-        http.Error(w, fmt.Sprintf("Error retrieving checkpoints: %v", err), http.StatusInternalServerError)
-        return
+		log.Printf("DB error retrieving checkpoints: %v",  err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+		return
     }
 
 	// CHQ: Gemini AI debugged the error handling
@@ -591,7 +571,8 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
 // getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
-func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
+// func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
+func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
     var gameplayCheckpoints []OldCheckpoint
     
     // The query now joins with the users table to get the user_name
@@ -611,7 +592,8 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
     
     rows, err := db.Query(query)
     if err != nil {
-        http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error retrieving checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
         return
     }
     defer rows.Close()
@@ -640,7 +622,7 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
     }
 
     if err = rows.Err(); err != nil {
-        http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
+        writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err))
         return
     }
 
@@ -651,13 +633,8 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
 func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
+	if !ok || playerID == "" { 
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
         return 
 	}
 
@@ -681,9 +658,10 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
         ORDER BY g.checkpoint_id`
     
     rows, err := db.Query(query, playerID)
-    if err != nil {
-        http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
-        return
+    if err != nil {		
+		log.Printf("DB error retrieving checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
     }
     defer rows.Close()
 
@@ -711,7 +689,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
 
 	if err = rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err))
 		return
 	}
 
@@ -726,18 +704,12 @@ func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
     isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Role not determined",
-		})
-
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Role not determined")
         return
     }
 
 	if (isAdmin) {
-		getAllCheckpointsAsAdmin(w)
+		getAllCheckpointsAsAdmin(w, r)
 	} else {
 		getAllCheckpointsAsPlayer(w, r)
 	}
@@ -748,14 +720,7 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
     if !ok || playerID == "" {
         // This should not happen if middleware succeeded, but good to check.
-        log.Printf("Forbidden: Player ID not found in session context.")
-                // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Player ID not found in session",
-		})
-
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Player ID not found in session context.")
         return
     }
 
@@ -764,7 +729,7 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     err := json.NewDecoder(r.Body).Decode(&req)
     if err != nil {
         log.Printf("Invalid request body or JSON format: %v", err)
-        http.Error(w, fmt.Sprintf("Invalid request body or JSON format: %v", err), http.StatusBadRequest)
+        writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body or JSON format: %v", err))
         return
     }
     
@@ -782,37 +747,31 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     if err != nil {
         log.Printf("Error executing SQL update for teacher ID %s: %v", playerID, err)
         // Ensure the error response is JSON for the frontend to handle gracefully.
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(SuccessResponse{
-            Message: fmt.Sprintf("Error updating profile in database: %v", err),
-        })
-        return
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error updating profile in database: %v", err))
+        return 
     }
 
     // 4. Check Rows Affected
     rowsAffected, err := result.RowsAffected()
     if err != nil {
         log.Printf("Error checking rows affected for teacher ID %s: %v", playerID, err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(SuccessResponse{
-            Message: "Error confirming profile update.",
-        })
+
+		writeJSONError(w, http.StatusInternalServerError, "Error confirming profile update.")
         return
     }
     if rowsAffected == 0 {
         log.Printf("Update attempted for teacher ID %s, but 0 rows affected. Profile not found?", playerID)
-        http.Error(w, "Authenticated teacher profile not found or no changes made", http.StatusNotFound)
+        writeJSONError(w, http.StatusNotFound, "Authenticated teacher profile not found or no changes made")
         return
     }
 
     // 5. Success Response
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(SuccessResponse{
-        Message: "Teacher updated successfully",
-    })
+   json.NewEncoder(w).Encode(SuccessResponse{
+    Success: true,
+    Message: "player updated successfully",
+})
 }
 
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
@@ -820,19 +779,19 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	var myCheckpoint OldCheckpoint
 	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
-		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "ID in URL and request body do not match")
 		return
 	}
 	myCheckpoint.ID = checkpoint_id
@@ -840,53 +799,51 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError,  fmt.Sprintf("Error updating myCheckpoint: %v", err) )
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError,  fmt.Sprintf("Error checking rows affected: %v", err) )
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "OldCheckpoint not found or no changes made", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound,  "OldCheckpoint not found or no changes made")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "OldCheckpoint updated successfully"})
-}
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+    	Message: "OldCheckpoint updated successfully",
+	})
+
+ }
 
 func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
-
-        return
+		writeJSONError(w, http.StatusForbidden,  "Forbidden: player ID not found in session")
+		return
 	}
 
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	var myCheckpoint OldCheckpoint
 	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
-		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "ID in URL and request body do not match")
 		return
 	}
 	myCheckpoint.ID = checkpoint_id
@@ -894,22 +851,26 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2 AND player_id = $3`
 	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error updating myCheckpoint: %v", err))
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "OldCheckpoint not found or not owned by this player", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found or not owned by this player")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "OldCheckpoint updated successfully"})
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+    	Message: "OldCheckpoint updated successfully",
+	})
+
 }
 
 func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
@@ -971,70 +932,71 @@ func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1`
 	result, err := db.Exec(query, checkpoint_id)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error deleting myCheckpoint: %v", err))
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "OldCheckpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "OldCheckpoint deleted successfully"})
+	json.NewEncoder(w).Encode(SuccessResponse{
+    Success: true,
+    Message: "OldCheckpoint updated successfully",
+})
 }
 
 func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: player ID not found in session",
-		})
-
-        return
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
+	 	return
 	}
 
 	vars := mux.Vars(r)
 	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1 AND player_id = $2`
 	result, err := db.Exec(query, checkpoint_id, playerID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error deleting myCheckpoint: %v", err))
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Error checking rows affected: %v", err))
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "OldCheckpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "OldCheckpoint deleted successfully"})
+	
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+    	Message: "OldCheckpoint updated successfully",
+	})
 }
 
 func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
