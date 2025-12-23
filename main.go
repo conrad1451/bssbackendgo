@@ -322,7 +322,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Forbidden: Role not determined",
+			"error": "Forbidden: player ID not found in session",
 		})
 
         return
@@ -392,7 +392,13 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 	isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Role not determined",
+		})
+
         return
     }
 
@@ -460,8 +466,14 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: player ID not found in session",
+		})
+
+        return
 	}
 
 	vars := mux.Vars(r)
@@ -516,7 +528,12 @@ func getCheckpoint(w http.ResponseWriter, r *http.Request){
     isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Role not determined",
+		})
         return
     }
 
@@ -533,8 +550,13 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 	
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+        // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: player ID not found in session",
+		})
+        return		 
 	}
 
 	// declared and not used: idcompilerUnusedVar
@@ -626,8 +648,13 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: player ID not found in session",
+		})
+        return 
 	}
 
 	var gameplayCheckpoints []OldCheckpoint
@@ -695,7 +722,13 @@ func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
     isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
     if !ok {
         // Fallback for safety, though middleware should ensure it's set
-        http.Error(w, "Forbidden: Role not determined", http.StatusForbidden)
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Role not determined",
+		})
+
         return
     }
 
@@ -712,7 +745,13 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     if !ok || playerID == "" {
         // This should not happen if middleware succeeded, but good to check.
         log.Printf("Forbidden: Player ID not found in session context.")
-        http.Error(w, "Forbidden: Player ID not found in session", http.StatusForbidden)
+                // http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: Player ID not found in session",
+		})
+
         return
     }
 
@@ -818,8 +857,14 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: player ID not found in session",
+		})
+
+        return
 	}
 
 	vars := mux.Vars(r)
@@ -950,8 +995,14 @@ func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+		// http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Forbidden: player ID not found in session",
+		})
+
+        return
 	}
 
 	vars := mux.Vars(r)
