@@ -39,6 +39,12 @@ type UpdatePlayerRequest struct {
     Email     string `json:"email"`
 }
 
+type SuccessResponse struct {
+    Success bool   `json:"success"`
+    Message string `json:"message,omitempty"`
+}
+
+
 // OldCheckpoint represents a user record in the database.
 // CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
 type OldCheckpoint struct {
