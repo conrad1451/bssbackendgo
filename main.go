@@ -248,7 +248,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
         // This is where a successfully authenticated user is automatically added to the players table.
         // It's called after validation but before processing the request, ensuring the player ID is in the DB.
-        insertPlayerIntoDB(playerID)
+        // insertPlayerIntoDB(playerID)
 
 		// Store the user ID and player ID in the request's context
 		// ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
