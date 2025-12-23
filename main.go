@@ -241,9 +241,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 		ctx = context.WithValue(ctx, contextKeyUserID, userID)
 		ctx = context.WithValue(ctx, contextKeyPlayerID, playerID)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
-		// next.ServeHTTP(w, r.WithContext(ctxWithIDs))
+ 
 		next.ServeHTTP(w, r.WithContext(ctx))
 
 	})
