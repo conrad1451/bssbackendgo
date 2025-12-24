@@ -68,7 +68,8 @@ All requests pass through `sessionValidationMiddleware`.
 - `contextKeyExternalPlayerID` → Descope player ID (string)
 - `contextKeyIsAdmin` → boolean
 
-Handlers **must not** re-parse tokens or query Descope directly.
+> **Rule:**  
+> Handlers must not re-parse JWTs or query Descope directly.
 
 ---
 
