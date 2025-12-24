@@ -21,68 +21,97 @@ import (
 	"github.com/gorilla/handlers"
 )
 
-// Checkpoint represents a user record in the database.
-// CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
+// Checkpoint represents a checkpoint in the database.
 type Checkpoint struct {
-	ID             int       `json:"id"`
-	Username       string    `json:"user_name"`
-	CheckpointData string    `json:"checkpoint_data"`
-	CreatedAt      time.Time `json:"created_at"`
-	LastEditedAt   time.Time `json:"last_edited_at"`
-	playerID	   string    `json:"player_id"`
+    ID        int       `json:"checkpoint_id"`
+    UserID    string    `json:"user_id"`
+    Title     string    `json:"title"`
+    Data      string    `json:"data"` // Use []byte for JSONB
+	// Data      []byte    `json:"data"` // Use []byte for JSONB
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+type UpdatePlayerRequest struct {
+    // FirstName string `json:"first_name"`
+    // LastName  string `json:"last_name"`
+	Username string `json:"user_name"`
+    Email     string `json:"email"`
+}
+
+type SuccessResponse struct {
+    Success bool   `json:"success"`
+    Message string `json:"message,omitempty"`
+}
+
+// User represents a user record in the database.
+type User struct {
+	UserID   int    `json:"user_id"`
+	Username string `json:"user_name"`
 }
 
 var db *sql.DB
 var descopeClient *client.DescopeClient
 
-var isAnAdmin bool
 // Define a custom key type to avoid collisions
 type contextKey string
 
-const contextKeyUserID contextKey = "userID"
-const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
+const contextKeyIsAdmin contextKey = "isAdmin"
+const contextKeyPlayerID contextKey = "playerID" // int (DB)
+const contextKeyExternalPlayerID contextKey = "externalPlayerID" // string (Descope)
+const contextKeyUserID contextKey = "userID" // int (DBs)
 
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "GOOGLE_VM_HOSTED_SQL"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
-
-// faviconHandler serves the favicon.ico file.
-func faviconHandler(w http.ResponseWriter, r *http.Request) {
-    // Open the favicon file
-    favicon, err := os.ReadFile("./static/calculator.ico")
-    if err != nil {
-        http.NotFound(w, r)
-        return
-    }
-
-    // Set the Content-Type header
-    w.Header().Set("Content-Type", "image/x-icon")
-    
-    // Write the file content to the response
-    w.Write(favicon)
+func mustGetEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("FATAL: required environment variable %s is not set", key)
+	}
+	return val
 }
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(SuccessResponse{
+		Success: false,
+		Message: msg,
+	})
+}
+
+
+func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
 
 func main() {
 	// Initialize database connection
+	connStr := mustGetEnv(listOfDBConnections[4])
+
 	var err error
-	dbConnStr := os.Getenv(listOfDBConnections[3])
-	if dbConnStr == "" {
-		log.Fatal("DATABASE_URL environment variable not set.")
-	}
+	db, err = sql.Open("postgres", connStr)
 
-	db, err = sql.Open("postgres", dbConnStr)
 	if err != nil {
-		log.Fatalf("Error opening database: %v", err)
-	}
-	defer db.Close()
+		log.Fatalf("Failed to open database: %v", err)
+	} 
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatalf("Error connecting to the database: %v", err)
+	if err = db.Ping(); err != nil {
+		log.Fatalf("Database ping failed: %v", err)
 	}
+  	// defer db.Close()
+
+	// err = db.Ping()
+	// if err != nil {
+	// 	log.Fatalf("Error connecting to the database: %v", err)
+	// }
 	fmt.Println("Successfully connected to the database!")
 
-	projectID := os.Getenv("DESCOPE_PROJECT_BSS_ID")
+	projectID := os.Getenv("DESCOPE_PROJECT_ID")
 	if projectID == "" {
 		log.Fatal("DESCOPE_PROJECT_ID environment variable not set.")
 	}
@@ -99,14 +128,17 @@ func main() {
 	router.HandleFunc("/favicon.ico", faviconHandler)
 
 	// Protected routes (require session validation)
-    protectedRoutes := router.PathPrefix("/api").Subrouter()
-    protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
-	protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
-	protectedRoutes.HandleFunc("/gamecheckpoints/{id}", getCheckpoint).Methods("GET")
-	protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
- 	protectedRoutes.HandleFunc("/gamecheckpoints/{id}", updateCheckpoint).Methods("PUT")
-	// protectedRoutes.HandleFunc("/gamecheckpoints/{id}", updateCheckpointALT).Methods("PATCH")
-	protectedRoutes.HandleFunc("/gamecheckpoints/{id}", deleteCheckpoint).Methods("DELETE")
+	protectedRoutes := router.PathPrefix("/api").Subrouter()
+	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
+	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
+	// protectedRoutes.HandleFunc("/usercreate", createUser).Methods("POST")
+	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
+	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
+	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", deleteCheckpoint).Methods("DELETE")
+
+	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints,).Methods("GET")
 
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
@@ -144,7 +176,23 @@ func main() {
 // helloHandler is the function that will be executed for requests to the "/" route.
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, "This is the server for the student records app. It's written in Go (aka GoLang).")
+	fmt.Fprint(w, "This is the server for the Bee Swarm Simulator (bss) game - at least the version made by Conrad. It's written in Go (aka GoLang).")
+}
+
+// faviconHandler serves the favicon.ico file.
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	// Open the favicon file
+	favicon, err := os.ReadFile("./static/beehive1.ico")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Set the Content-Type header
+	w.Header().Set("Content-Type", "image/x-icon")
+
+	// Write the file content to the response
+	w.Write(favicon)
 }
 
 // CHQ: Gemini AI created function
@@ -153,165 +201,389 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionToken := r.Header.Get("Authorization")
 		if sessionToken == "" {
-			http.Error(w, "Unauthorized: No session token provided", http.StatusUnauthorized)
-			return
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: No session token provided")
+ 			return
 		}
 
-		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ")
-
+		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ") 
 		ctx := r.Context()
+
 		authorized, token, err := descopeClient.Auth.ValidateSessionWithToken(ctx, sessionToken)
 		if err != nil || !authorized {
 			log.Printf("Session validation failed: %v", err)
-			http.Error(w, "Unauthorized: Invalid session token", http.StatusUnauthorized)
-			return
-		}
-		if descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"}) {
-			isAnAdmin = true
-		} else {
-			isAnAdmin = false
-		}
-
-		userID := token.ID
-		// userRole := token.GetTenants()
-		// userRole := token.GetTenantValue()
-		// userRole := token.GetTenants()
-		if userID == "" {
-			http.Error(w, "Unauthorized: User ID not found in token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: Invalid session token" )
 			return
 		}
 		
-		// For this example, we assume the player ID is the same as the user ID.
-		// In a real-world app, you would extract this from custom claims in the token.
-		playerID := userID
+		// isAdmin := descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"})
+		// isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
+		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 
-		// Store the user ID and teacher ID in the request's context
-		ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
-		ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
+
+		descopePlayerID := token.ID
+		if descopePlayerID == "" {
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: Player ID missing")
+			return
+		}
+
+		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
+
+		// --- Resolve player (internal DB ID) ---
+		var playerDBID int
+		err := db.QueryRow(`
+			SELECT id FROM players WHERE player_id = $1
+		`, descopePlayerID).Scan(&playerDBID)
+
+		if err == sql.ErrNoRows {
+			err = db.QueryRow(`
+				INSERT INTO players (player_id)
+				VALUES ($1)
+				RETURNING id
+			`, descopePlayerID).Scan(&playerDBID)
+		}
+
+		if err != nil {
+			log.Printf("player resolution failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+		// --- Resolve user ---
+		var userDBID int
+		err = db.QueryRow(`
+			SELECT id FROM users WHERE player_id = $1
+		`, playerDBID).Scan(&userDBID)
+
+		if err == sql.ErrNoRows {
+			err = db.QueryRow(`
+				INSERT INTO users (player_id)
+				VALUES ($1)
+				RETURNING id
+			`, playerDBID).Scan(&userDBID)
+		}
+
+		if err != nil {
+			log.Printf("user resolution failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+
+		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
+        // This is where a successfully authenticated user is automatically added to the players table.
+        // It's called after validation but before processing the request, ensuring the player ID is in the DB.
+        // insertPlayerIntoDB(playerID)
+
+		// // Store the user ID and player ID in the request's context
+		// // ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
+		// // ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
+        // // ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
+		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
+		// // ctx = context.WithValue(ctx, contextKeyUserID, userID) 
+		// ctx = context.WithValue(ctx, contextKeyUserID, userDBID) // int
+
+		// ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)        // int
+		// ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID) // string
+
 		
-		next.ServeHTTP(w, r.WithContext(ctxWithIDs))
+		// --- Store context ---
+		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
+		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
+		ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)
+		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
+ 
+		next.ServeHTTP(w, r.WithContext(ctx))
+
 	})
 }
 
-// createStudent handles POST requests to create a new student record.
-func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
- 
-	var playerCheckpoint Checkpoint
-	err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
+func insertPlayerIntoDB(playerID string) {
+	// // Using db.Exec() without context here for simplicity, but in a production environment,
+	// // consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+	// _, err := db.Exec(query, playerID)
+
+	query := `
+	INSERT INTO players (player_id, user_name, email) 
+	VALUES ($1, $2, $3)
+	ON CONFLICT (player_id) DO NOTHING
+`	
+	// Use context for database operation, though for a simple insert, context.Background() is often fine.
+	// Using db.Exec() without context here for simplicity, but in a production environment,
+	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+	// _, err := db.Exec(query, playerID, "username", "email")
+	_, err := db.Exec(
+		query,
+		playerID,
+		playerID,
+		playerID+"@example.com",
+	)
+
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
- 	query := `INSERT INTO gameplay_checkpoints (user_name, checkpoint_data, player_id) VALUES ($1, $2) RETURNING id`
-	err = db.QueryRow(query, playerCheckpoint.Username, playerCheckpoint.CheckpointData).Scan(&playerCheckpoint.ID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating player checkpoint: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(playerCheckpoint)
-}
-
-// createStudent handles POST requests to create a new student record.
-func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
-	}
-
-	var playerCheckpoint Checkpoint 
-	err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	
-	// Enforce that the playerCheckpoint being created is associated with the authenticated player.
-	playerCheckpoint.playerID = playerID
-
-	// 	ID             int       `json:"id"`
-	// Username       string    `json:"user_name"`
-	// CheckpointData string    `json:"checkpoint_data"`
-	// CreatedAt      time.Time `json:"created_at"`
-	// LastEditedAt   time.Time `json:"last_edited_at"`
-	// playerID	   string    `json:"player_id"`
-
-	query := `INSERT INTO gameplay_checkpoints (user_name, checkpoint_data, player_id) VALUES ($1, $2, $3) RETURNING id`
-	err = db.QueryRow(query, playerCheckpoint.Username, playerCheckpoint.CheckpointData, playerCheckpoint.playerID).Scan(&playerCheckpoint.ID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating checkpoint: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(playerCheckpoint)
-}
-
-func createCheckpoint(w http.ResponseWriter, r *http.Request){
-	if (isAnAdmin) {
-		createCheckpointAsAdmin(w, r)
+		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
+		// The middleware should not fail the request just because the background
+		// operation failed, unless the database error is critical.
+		log.Printf("AUTOMATIC REGISTRATION FAILED for Player ID %s: %v", playerID, err)
 	} else {
-		createCheckpointAsPlayer(w, r)
+		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Player ID %s ensured in players table.", playerID)
 	}
 } 
 
+// CHQ: Gemini AI refactored function to account for new user table 
+//      access in the database
+// func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
+//     var playerCheckpoint Checkpoint
+//     err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
+//     if err != nil {
+//         http.Error(w, err.Error(), http.StatusBadRequest)
+//         return
+//     }
 
-func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
- 
-	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+//     // 1. Check if the user exists in the 'users' table.
+//     var userID int
+//     err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", playerCheckpoint.Username).Scan(&userID)
+    
+//     if err == sql.ErrNoRows {
+//         // User does not exist, so create a new user first.
+//         insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
+//         err = db.QueryRow(insertUserQuery, playerCheckpoint.Username).Scan(&userID)
+//         if err != nil {
+//             http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
+//             return
+//         }
+//     } else if err != nil {
+//         http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
+//         return
+//     }
+
+//     // 2. Now that we have a valid userID, insert the oldcheckpoint data.
+//     // The query now inserts into user_id and checkpoint_data.
+//     query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING checkpoint_id`
+    
+//     var newCheckpointID int
+//     err = db.QueryRow(query, userID, playerCheckpoint.Data).Scan(&newCheckpointID)
+//     if err != nil {
+//         http.Error(w, fmt.Sprintf("Error creating player oldcheckpoint: %v", err), http.StatusInternalServerError)
+//         return
+//     }
+
+//     // Update the returned struct with the new ID.
+//     playerCheckpoint.ID = newCheckpointID
+    
+//     w.Header().Set("Content-Type", "application/json")
+//     w.WriteHeader(http.StatusCreated)
+//     json.NewEncoder(w).Encode(playerCheckpoint)
+// }
+
+// CHQ: Gemini AI refactored function to account for new user table 
+//      access in the database
+func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
+    playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+    if !ok || playerID == "" {
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
+		return
+    }
+
+    var requestBody struct {
+        Username       string `json:"user_name"`
+        Data string `json:"checkpoint_data"`
+    }
+    err := json.NewDecoder(r.Body).Decode(&requestBody)
+    if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON request body")
+        return
+    }
+
+    // 1. Check if the user exists and get their user_id.
+	var userID int
+	err = db.QueryRow("SELECT user_id FROM users WHERE player_id = $1", playerID).Scan(&userID)
+
+	if err == sql.ErrNoRows {
+		// User does not exist, so create a new user first.
+		insertUserQuery := "INSERT INTO users (user_name, player_id) VALUES ($1, $2) RETURNING user_id"
+		err = db.QueryRow(insertUserQuery, requestBody.Username, playerID).Scan(&userID)
+
+		
+		if err != nil {
+		log.Printf("DB error creating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+		return
+        }
+    } else if err != nil {
+		log.Printf("Error creating checkpoint: %v", err)
+		log.Printf("DB error checking for existing user: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+    }
+
+    // 2. Now that we have a valid userID, insert the oldcheckpoint data.
+    insertCheckpointQuery := `
+		INSERT INTO gameplay_checkpoints (user_id, checkpoint_data, player_id) 
+		VALUES ($1, $2, $3) RETURNING checkpoint_id`
+
+    var newCheckpointID int
+	// Pass the retrieved userID, oldcheckpoint data, and the playerID from the token
+	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.Data, playerID).Scan(&newCheckpointID)
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		log.Printf("Error creating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Error creating checkpoint")
+        return
+    }
+
+    // Return the newly created oldcheckpoint data.
+    responseCheckpoint := Checkpoint{
+        ID:             newCheckpointID,
+        Username:       requestBody.Username,
+        Data: requestBody.Data,
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(responseCheckpoint)
+}
+
+func createCheckpoint(w http.ResponseWriter, r *http.Request) {
+ 
+	isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Role not determined") 
+        return
+    }
+
+	if (isAdmin) {
+		// createCheckpointAsAdmin(w, r)
+	} else {
+		createCheckpointAsPlayer(w, r)
+	}
+}
+
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
+func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	var myCheckpoint Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE id = $1`
-	row := db.QueryRow(query, id)
-    // CHQ: Gemini AI Added the two timestamp fields to the Scan function
-	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
+	var userName string // New variable to hold the user_name from the join
+
+	query := `
+		SELECT 
+			g.checkpoint_id, 
+			u.user_name, 
+			    // g.player_id,/
+			g.checkpoint_data, 
+			g.created_at, 
+			g.last_edited_at, 
+			g.player_id 
+		FROM 
+			gameplay_checkpoints g 
+		JOIN 
+			users u ON g.user_id = u.user_id 
+		WHERE 
+			g.checkpoint_id = $1`
+
+	row := db.QueryRow(query, checkpoint_id)
+ 	// err = row.Scan(
+	// 	&myCheckpoint.ID,
+	// 	&userName, // Scan into a separate variable
+	// 	&myCheckpoint.Data,
+	// 	&myCheckpoint.CreatedAt,
+	// 	&myCheckpoint.LastEditedAt,
+	// 	&myCheckpoint.PlayerID,
+	// )
+
+	var cp Checkpoint
+	var username string
+
+	err = row.Scan(
+		&myCheckpoint.ID,
+		&userName, // Scan into a separate variable
+		&myCheckpoint.Data,
+		&myCheckpoint.CreatedAt,
+		&myCheckpoint.UpdatedAt,
+		&myCheckpoint.Title,
+	)
+
+// err := row.Scan(
+// 	&cp.ID,
+// 	&cp.UserID,
+// 	&cp.PlayerID,
+// 	&cp.Data,
+// 	&cp.CreatedAt,
+// 	&cp.UpdatedAt,
+// 	&username,
+// )
+
 	if err == sql.ErrNoRows {
-		http.Error(w, "Checkpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(myCheckpoint)
-}
-// getStudent handles GET requests to retrieve a single student by ID, but also checks for ownership.
-func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	
+	// Update the Checkpoint struct with the user_name from the join
+	myCheckpoint.Username = userName
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(myCheckpoint)
+}
+
+// getStudent handles GET requests to retrieve a single student by ID, but also checks for ownership.
+func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
+	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+	if !ok || playerID == "" { 
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
+        return
+	}
+
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid player ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid checkpoint ID")
 		return
 	}
 
 	var myCheckpoint Checkpoint
-	// Ensure the checkpoint belongs to the authenticated player.
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at, player_id FROM gameplay_checkpoints WHERE id = $1 AND player_id = $2`
-	row := db.QueryRow(query, id, playerID)
+	var userName string // New variable to hold the user_name from the join
+	// Ensure the oldcheckpoint belongs to the authenticated player.
+	query := `
+		SELECT 
+			g.checkpoint_id, 
+			u.user_name, 
+			g.checkpoint_data, 
+			g.created_at, 
+			g.last_edited_at, 
+			g.player_id 
+		FROM 
+			gameplay_checkpoints g 
+		JOIN 
+			users u ON g.user_id = u.user_id 
+		WHERE 
+			g.checkpoint_id = $1 AND g.player_id = $2` 
 
-	err = row.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt, &myCheckpoint.playerID) 
+	row := db.QueryRow(query, checkpoint_id, playerID)
+ 	err = row.Scan(
+		&myCheckpoint.ID,
+		&userName, // Scan into a separate variable
+		&myCheckpoint.Data,
+		&myCheckpoint.CreatedAt,
+		&myCheckpoint.UpdatedAt,
+		&myCheckpoint.Title,
+	)
+	
 	if err == sql.ErrNoRows {
-		http.Error(w, "myCheckpoint not found or not owned by this player", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "myCheckpoint not found or not owned by this player")
 		return
 	} else if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -319,78 +591,182 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(myCheckpoint)
 }
 
+func getCheckpoint(w http.ResponseWriter, r *http.Request){	
+	// Retrieve isAdmin from context
+    isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
+        return
+    }
 
-func getCheckpoint(w http.ResponseWriter, r *http.Request){
-	if (isAnAdmin) {
+	if (isAdmin) {
 		getCheckpointAsAdmin(w, r)
 	} else {
 		getCheckpointAsPlayer(w, r)
 	}
 }
 
-
-// getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
-func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
-	var gameplayCheckpoints []Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints ORDER BY id`
-	rows, err := db.Query(query)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var myCheckpoint Checkpoint
-		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
-		if err != nil {
-			log.Printf("Error scanning myCheckpoint row: %v", err)
-			continue
-		}
-		gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-	}
-
-	if err = rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(gameplayCheckpoints)
-}
-
-func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
+// CHQ: Gemini AI debugged this function
+func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
+	// isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
+        return		 
+	}
+
+	// declared and not used: idcompilerUnusedVar
+	// vars := mux.Vars(r)
+	// checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
+	// if err != nil {
+	// 	http.Error(w, "Invalid player ID", http.StatusBadRequest)
+	// 	return
+	// }
+
+	// CHQ: Gemini AI debugged the function call
+	thoseCheckpoints, err := GetUserCheckpoints(playerID)
+    if err != nil {
+        // If an error occurred in the database function, handle it here.
+		log.Printf("DB error retrieving checkpoints: %v",  err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
 		return
+    }
+
+	// CHQ: Gemini AI debugged the error handling
+	// Check if the user has any checkpoints and send an empty array if not.
+    if thoseCheckpoints == nil {
+        thoseCheckpoints = []Checkpoint{}
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(thoseCheckpoints)
+}
+
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
+// getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
+// func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
+func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
+    var gameplayCheckpoints []Checkpoint
+    
+    // The query now joins with the users table to get the user_name
+    query := `
+        SELECT 
+            g.checkpoint_id, 
+            u.user_name, 
+            g.checkpoint_data, 
+            g.created_at, 
+            g.last_edited_at, 
+            g.player_id 
+        FROM 
+            gameplay_checkpoints g 
+        JOIN 
+            users u ON g.user_id = u.user_id 
+        ORDER BY g.checkpoint_id`
+    
+    rows, err := db.Query(query)
+    if err != nil {
+		log.Printf("DB error retrieving checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+        return
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var myCheckpoint Checkpoint
+        var userName string // New variable to hold the user_name from the join
+
+        err := rows.Scan(
+            &myCheckpoint.ID,
+            &userName, // Scan into a separate variable
+            &myCheckpoint.Data,	
+            &myCheckpoint.CreatedAt,
+            &myCheckpoint.LastEditedAt,
+            &myCheckpoint.PlayerID,
+        )
+        
+        if err != nil {
+            log.Printf("Error scanning myCheckpoint row: %v", err)
+            continue
+        }
+        
+        // Update the Checkpoint struct with the user_name from the join
+        myCheckpoint.Username = userName
+        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
+    }
+
+    if err = rows.Err(); err != nil {
+		log.Printf("DB error iterating over checkpoint rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(gameplayCheckpoints)
+}
+
+// CHQ: Gemini AI refactored to account for fk of user_name and user table
+func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
+	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+	if !ok || playerID == "" { 
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
+        return 
 	}
 
 	var gameplayCheckpoints []Checkpoint
-	// CHQ: Gemini AI added the two timestamp columns to the SELECT query
-	query := `SELECT id, user_name, checkpoint_data, created_at, last_edited_at FROM gameplay_checkpoints WHERE player_id = $1 ORDER BY id`
-	rows, err := db.Query(query, playerID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error retrieving gameplay_checkpoints: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var myCheckpoint Checkpoint
-		// CHQ: Gemini AI added the two timestamp fields to the Scan function
-		err := rows.Scan(&myCheckpoint.ID, &myCheckpoint.Username, &myCheckpoint.CheckpointData, &myCheckpoint.CreatedAt, &myCheckpoint.LastEditedAt)
-		if err != nil {
-			log.Printf("Error scanning myCheckpoint row: %v", err)
-			continue
-		}
-		gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-	}
+    // The query now joins with the users table to get the user_name
+    query := `
+        SELECT 
+            g.checkpoint_id, 
+            u.user_name, 
+            g.checkpoint_data, 
+            g.created_at, 
+            g.last_edited_at, 
+            g.player_id 
+        FROM 
+            gameplay_checkpoints g 
+        JOIN 
+            users u ON g.user_id = u.user_id 
+		WHERE
+			g.player_id = $1 
+        ORDER BY g.checkpoint_id`
+    
+    rows, err := db.Query(query, playerID)
+    if err != nil {		
+		log.Printf("DB error retrieving checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var myCheckpoint Checkpoint
+        var userName string // New variable to hold the user_name from the join
+
+        err := rows.Scan(
+            &myCheckpoint.ID,
+            &userName, // Scan into a separate variable
+            &myCheckpoint.Data,
+            &myCheckpoint.CreatedAt,
+            &myCheckpoint.LastEditedAt,
+            &myCheckpoint.PlayerID,
+        )
+        
+        if err != nil {
+            log.Printf("Error scanning myCheckpoint row: %v", err)
+            continue
+        }
+        
+        // Update the Checkpoint struct with the user_name from the join
+        myCheckpoint.Username = userName
+        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
+    }
 
 	if err = rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error iterating over myCheckpoint rows: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error iterating over checkpoints: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -398,228 +774,421 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(gameplayCheckpoints)
 }
 
+func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
+	// CHQ: Gemini AI changed fetching global vatiable to retrieving variable from context
 
-func getAllCheckpoints(w http.ResponseWriter, r *http.Request){
-	if (isAnAdmin) {
-		getAllCheckpointsAsAdmin(w)
+	// Retrieve isAdmin from context
+    isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+    if !ok {
+        // Fallback for safety, though middleware should ensure it's set
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Role not determined")
+        return
+    }
+
+	if (isAdmin) {
+		getAllCheckpointsAsAdmin(w, r)
 	} else {
 		getAllCheckpointsAsPlayer(w, r)
 	}
 }
 
+func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
+    // 1. Authorization: Get the ID of the logged-in player from the context.
+    playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+    if !ok || playerID == "" {
+        // This should not happen if middleware succeeded, but good to check.
+		writeJSONError(w, http.StatusForbidden, "Forbidden: Player ID not found in session context.")
+        return
+    }
+
+    // 2. Decode Request Body: CRITICAL FIX
+    var req UpdatePlayerRequest // Use the struct with correct JSON tags
+    // err := json.NewDecoder(r.Body).Decode(&req)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&req)
+
+    if err != nil {
+ 		log.Printf("Invalid request body or JSON format: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body or JSON format") 
+		return
+    }
+    
+    // 3. Database Update: Update the player profile identified by the authenticated playerID.
+    // The query and arguments were correct, but the data source (req) must be correct.
+    // CHQ: Gemini AI fixed the line below for correct name for id field
+	// FIX: Changed "id" to "player_id" to match the actual database column name.
+
+	// CHQ: Gemini AI corrected query
+	query := `UPDATE players SET user_name = $1, email = $2 WHERE player_id = $3`    
+    // Note: We are using the fields from the unmarshalled 'req' struct.
+    // Ensure db is available in scope.
+    result, err := db.Exec(query, req.Username, req.Email, playerID)
+
+    if err != nil {
+        log.Printf("Error executing SQL update for player ID %s: %v", playerID, err)
+        // Ensure the error response is JSON for the frontend to handle gracefully.
+		log.Printf("DB error updating player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return 
+    }
+
+    // 4. Check Rows Affected
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        log.Printf("Error checking rows affected for player ID %s: %v", playerID, err)
+
+		writeJSONError(w, http.StatusInternalServerError, "Error confirming profile update.")
+        return
+    }
+    if rowsAffected == 0 {
+        log.Printf("Update attempted for player ID %s, but 0 rows affected. Profile not found?", playerID)
+        writeJSONError(w, http.StatusNotFound, "Authenticated player profile not found or no changes made")
+        return
+    }
+
+    // 5. Success Response
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+   json.NewEncoder(w).Encode(SuccessResponse{
+    Success: true,
+    Message: "player updated successfully",
+})
+}
+
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
 func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	var myCheckpoint Checkpoint
-	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&myCheckpoint)
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("Invalid request body: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
-		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
+	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
+		writeJSONError(w, http.StatusBadRequest, "ID in URL and request body do not match")
 		return
 	}
-	myCheckpoint.ID = id
-    // Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
-	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
+	myCheckpoint.ID = checkpoint_id
+	// Database automatically updates last_edited_at columns
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2`
+	result, err := db.Exec(query, myCheckpoint.Data, myCheckpoint.ID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error updating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error checking affected rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound,  "Checkpoint not found or no changes made")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
-}
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+    	Message: "Checkpoint updated successfully",
+	})
+
+ }
 
 func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden,  "Forbidden: player ID not found in session")
 		return
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
 	var myCheckpoint Checkpoint
-	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&myCheckpoint)
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("Invalid request body: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body") 
 		return
 	}
 
-	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
-		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
+	if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
+		writeJSONError(w, http.StatusBadRequest, "ID in URL and request body do not match")
 		return
 	}
-	myCheckpoint.ID = id
-    // Database automatically updates last_edited_at columns
-	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3 AND player_id = $4`
-	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
-		return
+	myCheckpoint.ID = checkpoint_id
+	// Database automatically updates last_edited_at columns
+	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2 AND player_id = $3`
+	result, err := db.Exec(query, myCheckpoint.Data, myCheckpoint.ID, playerID)
+	if err != nil { 
+		log.Printf("DB error updating checkpoint: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+ 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
-		return
+		log.Printf("DB error checking affected rows: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found or not owned by this player")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+    	Message: "Checkpoint updated successfully",
+	})
+
 }
 
+func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
+	isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	// if isAnAdmin {
 
-func updateCheckpoint(w http.ResponseWriter, r *http.Request){
-	if (isAnAdmin) {
+	if isAdmin {
 		updateCheckpointAsAdmin(w, r)
 	} else {
 		updateCheckpointAsPlayer(w, r)
 	}
 }
 
-
 // CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
 // func updateCheckpointALT(w http.ResponseWriter, r *http.Request) {
-// 	vars := mux.Vars(r)
-// 	id, err := strconv.Atoi(vars["id"])
-// 	if err != nil {
-// 		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
-// 		return
-// 	}
+//  vars := mux.Vars(r)
+//  id, err := strconv.Atoi(vars["checkpoint_id"])
+//  if err != nil {
+//      http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+//      return
+//  }
 
-// 	var myCheckpoint Checkpoint
-// 	err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusBadRequest)
-// 		return
-// 	}
+//  var myCheckpoint Checkpoint
+//  err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
+//  if err != nil {
+//      http.Error(w, err.Error(), http.StatusBadRequest)
+//      return
+//  }
 
-// 	if myCheckpoint.ID != 0 && myCheckpoint.ID != id {
-// 		http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
-// 		return
-// 	}
-// 	myCheckpoint.ID = id
-//     // Database automatically updates last_edited_at columns
-// 	query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE id = $3`
-// 	result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
-// 	if err != nil {
-// 		http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
-// 		return
-// 	}
+//  if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
+//      http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
+//      return
+//  }
+//  myCheckpoint.ID = checkpoint_id
+//     // Database automatically updates last_edited_at columns
+//  query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE checkpoint_id = $3`
+//  result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.Data, myCheckpoint.ID)
+//  if err != nil {
+//      http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
+//      return
+//  }
 
-// 	rowsAffected, err := result.RowsAffected()
-// 	if err != nil {
-// 		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
-// 		return
-// 	}
-// 	if rowsAffected == 0 {
-// 		http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
-// 		return
-// 	}
+//  rowsAffected, err := result.RowsAffected()
+//  if err != nil {
+//      http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+//      return
+//  }
+//  if rowsAffected == 0 {
+//      http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
+//      return
+//  }
 
-// 	w.Header().Set("Content-Type", "application/json")
-// 	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
+//  w.Header().Set("Content-Type", "application/json")
+//  json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
 // }
 
 // deleteCheckpointAsAdmin handles DELETE requests to delete a myCheckpoint record by ID.
 func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
-	query := `DELETE FROM gameplay_checkpoints WHERE id = $1`
-	result, err := db.Exec(query, id)
+	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1`
+	result, err := db.Exec(query, checkpoint_id)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error deleting checkpoint for player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error checking rows affected: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Checkpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint deleted successfully"})
+	json.NewEncoder(w).Encode(SuccessResponse{
+    Success: true,
+    Message: "Checkpoint deleted successfully",
+})
 }
 
 func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
 	if !ok || playerID == "" {
-		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-		return
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
+	 	return
 	}
-	
+
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
 	if err != nil {
-		http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
 		return
 	}
 
-	query := `DELETE FROM gameplay_checkpoints WHERE id = $1 AND player_id = $2`
-	result, err := db.Exec(query, id, playerID)
+	query := `DELETE FROM gameplay_checkpoints WHERE checkpoint_id = $1 AND player_id = $2`
+	result, err := db.Exec(query, checkpoint_id, playerID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error deleting myCheckpoint: %v", err), http.StatusInternalServerError)
+		log.Printf("DB error deleting checkpoint for player: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
-		return
+		log.Printf("DB error checking rows affected: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+ 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Checkpoint not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint deleted successfully"})
+	
+	json.NewEncoder(w).Encode(SuccessResponse{
+    	Success: true,
+		Message: "Checkpoint deleted successfully",
+	})
 }
 
-func deleteCheckpoint(w http.ResponseWriter, r *http.Request){
-	if (isAnAdmin) {
+func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
+	isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
+	// if isAnAdmin {
+	if isAdmin {
 		deleteCheckpointAsAdmin(w, r)
 	} else {
 		deleteCheckpointAsPlayer(w, r)
 	}
+}
+
+
+// NEW CHECKPOINTS
+
+
+// CHQ: Gemini AI created function
+// StoreNewUser takes a Descope user ID and inserts it into the `users` table.
+// It returns an error if the insertion fails.
+// func StoreNewUser(userID string) error {
+// 	// The SQL INSERT statement. We use a parameterized query ($1)
+// 	// to prevent SQL injection attacks.
+// 	query := "INSERT INTO game_users (checkpoint_id) VALUES ($1)"
+
+// 	// Execute the SQL statement. The Exec method is used for
+// 	// commands that do not return a result set, such as INSERT, UPDATE, or DELETE.
+// 	_, err := db.Exec(query, userID)
+// 	if err != nil {
+// 		// Return a wrapped error to provide more context about the failure.
+// 		return fmt.Errorf("failed to insert new user with ID %s: %w", userID, err)
+// 	}
+
+// 	// If the insertion was successful, return nil for the error.
+// 	fmt.Printf("Successfully stored new user with ID: %s\n", userID)
+// 	return nil
+// }
+
+// CHQ: Gemini AI edited this 
+// Example function to retrieve a user's checkpoints
+// func createUser(w http.ResponseWriter, r *http.Request) {
+// 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
+// 	if !ok || playerID == "" {
+// 		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
+// 		return
+// 	}
+
+// 	// Correctly handle the error returned by StoreNewUser.
+// 	err := StoreNewUser(playerID)
+// 	if err != nil {
+// 		// Log the error and return an appropriate internal server error status.
+// 		http.Error(w, fmt.Sprintf("Error storing user: %v", err), http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Prepare a success response.
+// 	response := map[string]string{"message": "User created successfully", "userId": playerID}
+
+// 	w.Header().Set("Content-Type", "application/json")
+// 	w.WriteHeader(http.StatusCreated)
+// 	json.NewEncoder(w).Encode(response)
+// }
+
+// CHQ: Gemini AI created function
+// Example function to retrieve a user's checkpoints
+func GetUserCheckpoints(userID string) ([]Checkpoint, error) {
+    // 1. Prepare a slice to hold the checkpoints.
+    var checkpoints []Checkpoint
+
+    // 2. Query the database for all checkpoints belonging to the given user ID.
+    // The query uses a parameterized statement ($1) to prevent SQL injection.
+    rows, err := db.Query("SELECT checkpoint_id, title, data, created_at, updated_at FROM game_checkpoints WHERE user_id = $1", userID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query game_checkpoints for user %s: %w", userID, err)
+    }
+    defer rows.Close()
+
+    // 3. Iterate through the result set and scan each row into a Checkpoint struct.
+    for rows.Next() {
+        var cp Checkpoint
+        err := rows.Scan(&cp.ID, &cp.Title, &cp.Data, &cp.CreatedAt, &cp.UpdatedAt)
+        if err != nil {
+            return nil, fmt.Errorf("failed to scan checkpoint row: %w", err)
+        }
+        checkpoints = append(checkpoints, cp)
+    }
+
+    // 4. Check for any errors that occurred during the iteration.
+    if err = rows.Err(); err != nil {
+        return nil, fmt.Errorf("error during row iteration: %w", err)
+    }
+
+    // 5. Return the slice of checkpoints.
+    return checkpoints, nil
 }
