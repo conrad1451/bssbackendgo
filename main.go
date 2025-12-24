@@ -44,19 +44,6 @@ type SuccessResponse struct {
     Message string `json:"message,omitempty"`
 }
 
-
-// OldCheckpoint represents a user record in the database.
-// CHQ: Gemini AI added CreatedAt and LastEditedAt to the struct
-type OldCheckpoint struct {
-	ID             int            `json:"checkpoint_id"`
-	Username       string         `json:"user_name"`
-	CheckpointData string         `json:"checkpoint_data"`
-	CreatedAt      time.Time      `json:"created_at"`
-	LastEditedAt   time.Time      `json:"last_edited_at"`
-	PlayerID       sql.NullString `json:"player_id"` // Use sql.NullString for nullable columns
-	// playerID    string    `json:"player_id"`
-}
-
 // User represents a user record in the database.
 type User struct {
 	UserID   int    `json:"user_id"`
@@ -70,9 +57,10 @@ var descopeClient *client.DescopeClient
 type contextKey string
 
 const contextKeyIsAdmin contextKey = "isAdmin"
+const contextKeyPlayerID contextKey = "playerID" // int (DB)
+const contextKeyExternalPlayerID contextKey = "externalPlayerID" // string (Descope)
+const contextKeyUserID contextKey = "userID" // int (DBs)
 
-const contextKeyUserID contextKey = "userID"
-const contextKeyPlayerID contextKey = "playerID" // A key for the player ID
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
@@ -217,9 +205,9 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
  			return
 		}
 
-		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ")
-
+		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ") 
 		ctx := r.Context()
+
 		authorized, token, err := descopeClient.Auth.ValidateSessionWithToken(ctx, sessionToken)
 		if err != nil || !authorized {
 			log.Printf("Session validation failed: %v", err)
@@ -228,35 +216,81 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		}
 		
 		// isAdmin := descopeClient.Auth.ValidateRoles(context.Background(), token, []string{"Game Admin"})
-		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
-		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
+		// isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
+		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 
 
-		userID := token.ID
-		// userRole := token.GetTenants()
-		// userRole := token.GetTenantValue()
-		// userRole := token.GetTenants()
-		if userID == "" {
-			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: User ID not found in token") 
+		descopePlayerID := token.ID
+		if descopePlayerID == "" {
+			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: Player ID missing")
 			return
 		}
 
-		// For this example, we assume the player ID is the same as the user ID.
-		// In a real-world app, you would extract this from custom claims in the token.
-		playerID := userID
+		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
+
+		// --- Resolve player (internal DB ID) ---
+		var playerDBID int
+		err := db.QueryRow(`
+			SELECT id FROM players WHERE player_id = $1
+		`, descopePlayerID).Scan(&playerDBID)
+
+		if err == sql.ErrNoRows {
+			err = db.QueryRow(`
+				INSERT INTO players (player_id)
+				VALUES ($1)
+				RETURNING id
+			`, descopePlayerID).Scan(&playerDBID)
+		}
+
+		if err != nil {
+			log.Printf("player resolution failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+		// --- Resolve user ---
+		var userDBID int
+		err = db.QueryRow(`
+			SELECT id FROM users WHERE player_id = $1
+		`, playerDBID).Scan(&userDBID)
+
+		if err == sql.ErrNoRows {
+			err = db.QueryRow(`
+				INSERT INTO users (player_id)
+				VALUES ($1)
+				RETURNING id
+			`, playerDBID).Scan(&userDBID)
+		}
+
+		if err != nil {
+			log.Printf("user resolution failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
 
 		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
         // This is where a successfully authenticated user is automatically added to the players table.
         // It's called after validation but before processing the request, ensuring the player ID is in the DB.
         // insertPlayerIntoDB(playerID)
 
-		// Store the user ID and player ID in the request's context
-		// ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
-		// ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
-        // ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
+		// // Store the user ID and player ID in the request's context
+		// // ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
+		// // ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
+        // // ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
+		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
+		// // ctx = context.WithValue(ctx, contextKeyUserID, userID) 
+		// ctx = context.WithValue(ctx, contextKeyUserID, userDBID) // int
+
+		// ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)        // int
+		// ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID) // string
+
+		
+		// --- Store context ---
 		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
-		ctx = context.WithValue(ctx, contextKeyUserID, userID)
-		ctx = context.WithValue(ctx, contextKeyPlayerID, playerID)
+		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
+		ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)
+		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
  
 		next.ServeHTTP(w, r.WithContext(ctx))
 
@@ -298,7 +332,7 @@ func insertPlayerIntoDB(playerID string) {
 // CHQ: Gemini AI refactored function to account for new user table 
 //      access in the database
 // func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
-//     var playerCheckpoint OldCheckpoint
+//     var playerCheckpoint Checkpoint
 //     err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
 //     if err != nil {
 //         http.Error(w, err.Error(), http.StatusBadRequest)
@@ -327,7 +361,7 @@ func insertPlayerIntoDB(playerID string) {
 //     query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING checkpoint_id`
     
 //     var newCheckpointID int
-//     err = db.QueryRow(query, userID, playerCheckpoint.CheckpointData).Scan(&newCheckpointID)
+//     err = db.QueryRow(query, userID, playerCheckpoint.Data).Scan(&newCheckpointID)
 //     if err != nil {
 //         http.Error(w, fmt.Sprintf("Error creating player oldcheckpoint: %v", err), http.StatusInternalServerError)
 //         return
@@ -352,7 +386,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 
     var requestBody struct {
         Username       string `json:"user_name"`
-        CheckpointData string `json:"checkpoint_data"`
+        Data string `json:"checkpoint_data"`
     }
     err := json.NewDecoder(r.Body).Decode(&requestBody)
     if err != nil {
@@ -389,7 +423,7 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 
     var newCheckpointID int
 	// Pass the retrieved userID, oldcheckpoint data, and the playerID from the token
-	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.CheckpointData, playerID).Scan(&newCheckpointID)
+	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.Data, playerID).Scan(&newCheckpointID)
 	if err != nil {
 		log.Printf("Error creating checkpoint: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Error creating checkpoint")
@@ -397,10 +431,10 @@ func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
     }
 
     // Return the newly created oldcheckpoint data.
-    responseCheckpoint := OldCheckpoint{
+    responseCheckpoint := Checkpoint{
         ID:             newCheckpointID,
         Username:       requestBody.Username,
-        CheckpointData: requestBody.CheckpointData,
+        Data: requestBody.Data,
     }
 
     w.Header().Set("Content-Type", "application/json")
@@ -434,13 +468,14 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var myCheckpoint OldCheckpoint
+	var myCheckpoint Checkpoint
 	var userName string // New variable to hold the user_name from the join
 
 	query := `
 		SELECT 
 			g.checkpoint_id, 
 			u.user_name, 
+			    // g.player_id,/
 			g.checkpoint_data, 
 			g.created_at, 
 			g.last_edited_at, 
@@ -453,17 +488,39 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 			g.checkpoint_id = $1`
 
 	row := db.QueryRow(query, checkpoint_id)
- 	err = row.Scan(
+ 	// err = row.Scan(
+	// 	&myCheckpoint.ID,
+	// 	&userName, // Scan into a separate variable
+	// 	&myCheckpoint.Data,
+	// 	&myCheckpoint.CreatedAt,
+	// 	&myCheckpoint.LastEditedAt,
+	// 	&myCheckpoint.PlayerID,
+	// )
+
+	var cp Checkpoint
+	var username string
+
+	err = row.Scan(
 		&myCheckpoint.ID,
 		&userName, // Scan into a separate variable
-		&myCheckpoint.CheckpointData,
+		&myCheckpoint.Data,
 		&myCheckpoint.CreatedAt,
-		&myCheckpoint.LastEditedAt,
-		&myCheckpoint.PlayerID,
+		&myCheckpoint.UpdatedAt,
+		&myCheckpoint.Title,
 	)
 
+// err := row.Scan(
+// 	&cp.ID,
+// 	&cp.UserID,
+// 	&cp.PlayerID,
+// 	&cp.Data,
+// 	&cp.CreatedAt,
+// 	&cp.UpdatedAt,
+// 	&username,
+// )
+
 	if err == sql.ErrNoRows {
-		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	} else if err != nil {
 		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
@@ -471,7 +528,7 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Update the OldCheckpoint struct with the user_name from the join
+	// Update the Checkpoint struct with the user_name from the join
 	myCheckpoint.Username = userName
 
 	w.Header().Set("Content-Type", "application/json")
@@ -493,7 +550,7 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var myCheckpoint OldCheckpoint
+	var myCheckpoint Checkpoint
 	var userName string // New variable to hold the user_name from the join
 	// Ensure the oldcheckpoint belongs to the authenticated player.
 	query := `
@@ -515,10 +572,10 @@ func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
  	err = row.Scan(
 		&myCheckpoint.ID,
 		&userName, // Scan into a separate variable
-		&myCheckpoint.CheckpointData,
+		&myCheckpoint.Data,
 		&myCheckpoint.CreatedAt,
-		&myCheckpoint.LastEditedAt,
-		&myCheckpoint.PlayerID,
+		&myCheckpoint.UpdatedAt,
+		&myCheckpoint.Title,
 	)
 	
 	if err == sql.ErrNoRows {
@@ -591,7 +648,7 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 // getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
 // func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
-    var gameplayCheckpoints []OldCheckpoint
+    var gameplayCheckpoints []Checkpoint
     
     // The query now joins with the users table to get the user_name
     query := `
@@ -617,13 +674,13 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
     defer rows.Close()
 
     for rows.Next() {
-        var myCheckpoint OldCheckpoint
+        var myCheckpoint Checkpoint
         var userName string // New variable to hold the user_name from the join
 
         err := rows.Scan(
             &myCheckpoint.ID,
             &userName, // Scan into a separate variable
-            &myCheckpoint.CheckpointData,
+            &myCheckpoint.Data,	
             &myCheckpoint.CreatedAt,
             &myCheckpoint.LastEditedAt,
             &myCheckpoint.PlayerID,
@@ -634,7 +691,7 @@ func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
             continue
         }
         
-        // Update the OldCheckpoint struct with the user_name from the join
+        // Update the Checkpoint struct with the user_name from the join
         myCheckpoint.Username = userName
         gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
     }
@@ -657,7 +714,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
         return 
 	}
 
-	var gameplayCheckpoints []OldCheckpoint
+	var gameplayCheckpoints []Checkpoint
 
     // The query now joins with the users table to get the user_name
     query := `
@@ -685,13 +742,13 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
     defer rows.Close()
 
     for rows.Next() {
-        var myCheckpoint OldCheckpoint
+        var myCheckpoint Checkpoint
         var userName string // New variable to hold the user_name from the join
 
         err := rows.Scan(
             &myCheckpoint.ID,
             &userName, // Scan into a separate variable
-            &myCheckpoint.CheckpointData,
+            &myCheckpoint.Data,
             &myCheckpoint.CreatedAt,
             &myCheckpoint.LastEditedAt,
             &myCheckpoint.PlayerID,
@@ -702,7 +759,7 @@ func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
             continue
         }
         
-        // Update the OldCheckpoint struct with the user_name from the join
+        // Update the Checkpoint struct with the user_name from the join
         myCheckpoint.Username = userName
         gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
     }
@@ -808,7 +865,7 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var myCheckpoint OldCheckpoint
+	var myCheckpoint Checkpoint
 	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 
 	decoder := json.NewDecoder(r.Body)
@@ -828,7 +885,7 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	myCheckpoint.ID = checkpoint_id
 	// Database automatically updates last_edited_at columns
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2`
-	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID)
+	result, err := db.Exec(query, myCheckpoint.Data, myCheckpoint.ID)
 	if err != nil {
 		log.Printf("DB error updating checkpoint: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
@@ -842,14 +899,14 @@ func updateCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rowsAffected == 0 {
-		writeJSONError(w, http.StatusNotFound,  "OldCheckpoint not found or no changes made")
+		writeJSONError(w, http.StatusNotFound,  "Checkpoint not found or no changes made")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SuccessResponse{
     	Success: true,
-    	Message: "OldCheckpoint updated successfully",
+    	Message: "Checkpoint updated successfully",
 	})
 
  }
@@ -868,7 +925,7 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var myCheckpoint OldCheckpoint
+	var myCheckpoint Checkpoint
 	// err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -887,7 +944,7 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	myCheckpoint.ID = checkpoint_id
 	// Database automatically updates last_edited_at columns
 	query := `UPDATE gameplay_checkpoints SET checkpoint_data = $1 WHERE checkpoint_id = $2 AND player_id = $3`
-	result, err := db.Exec(query, myCheckpoint.CheckpointData, myCheckpoint.ID, playerID)
+	result, err := db.Exec(query, myCheckpoint.Data, myCheckpoint.ID, playerID)
 	if err != nil { 
 		log.Printf("DB error updating checkpoint: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
@@ -901,14 +958,14 @@ func updateCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
  		return
 	}
 	if rowsAffected == 0 {
-		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found or not owned by this player")
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found or not owned by this player")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SuccessResponse{
     	Success: true,
-    	Message: "OldCheckpoint updated successfully",
+    	Message: "Checkpoint updated successfully",
 	})
 
 }
@@ -933,7 +990,7 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 //      return
 //  }
 
-//  var myCheckpoint OldCheckpoint
+//  var myCheckpoint Checkpoint
 //  err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
 //  if err != nil {
 //      http.Error(w, err.Error(), http.StatusBadRequest)
@@ -947,7 +1004,7 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 //  myCheckpoint.ID = checkpoint_id
 //     // Database automatically updates last_edited_at columns
 //  query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE checkpoint_id = $3`
-//  result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.CheckpointData, myCheckpoint.ID)
+//  result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.Data, myCheckpoint.ID)
 //  if err != nil {
 //      http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
 //      return
@@ -959,12 +1016,12 @@ func updateCheckpoint(w http.ResponseWriter, r *http.Request) {
 //      return
 //  }
 //  if rowsAffected == 0 {
-//      http.Error(w, "OldCheckpoint not found or no changes made", http.StatusNotFound)
+//      http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
 //      return
 //  }
 
 //  w.Header().Set("Content-Type", "application/json")
-//  json.NewEncoder(w).Encode(map[string]string{"message": "OldCheckpoint updated successfully"})
+//  json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
 // }
 
 // deleteCheckpointAsAdmin handles DELETE requests to delete a myCheckpoint record by ID.
@@ -991,14 +1048,14 @@ func deleteCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rowsAffected == 0 {
-		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SuccessResponse{
     Success: true,
-    Message: "OldCheckpoint deleted successfully",
+    Message: "Checkpoint deleted successfully",
 })
 }
 
@@ -1031,7 +1088,7 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
  		return
 	}
 	if rowsAffected == 0 {
-		writeJSONError(w, http.StatusNotFound, "OldCheckpoint not found")
+		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
 	}
 
@@ -1039,7 +1096,7 @@ func deleteCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
 	
 	json.NewEncoder(w).Encode(SuccessResponse{
     	Success: true,
-		Message: "OldCheckpoint deleted successfully",
+		Message: "Checkpoint deleted successfully",
 	})
 }
 
