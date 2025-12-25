@@ -227,42 +227,33 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 //   - Store the returned ID in request context
 //   - Use the returned ID for all authorization and ownership checks
 // func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (string, error) {
-func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (int, error) {
+func resolveOrCreatePlayer(
+	ctx context.Context,
+	tx *sql.Tx,
+	externalPlayerID string,
+) (int, error) {
 
-    // var internalPlayerID string
-    var internalPlayerID int
+	var playerID int
 
-    // err := db.QueryRow(`
-    //     SELECT id
-    //     FROM players
-    //     WHERE player_id = $1
-    // `, externalPlayerID).Scan(&internalPlayerID)
-
-    // if err == sql.ErrNoRows {
-    //     err = db.QueryRow(`
-    //         INSERT INTO players (player_id)
-    //         VALUES ($1)
-    //         RETURNING id
-    //     `, externalPlayerID).Scan(&internalPlayerID)
-    // }
-
-	
-	err := db.QueryRowContext(ctx, `
-		SELECT id
-		FROM players
-		WHERE player_id = $1
-	`, externalPlayerID).Scan(&internalPlayerID)
+	err := tx.QueryRowContext(ctx, `
+		SELECT id FROM players WHERE player_id = $1
+	`, externalPlayerID).Scan(&playerID)
 
 	if err == sql.ErrNoRows {
-		err = db.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			INSERT INTO players (player_id)
 			VALUES ($1)
 			RETURNING id
-		`, externalPlayerID).Scan(&internalPlayerID)
+		`, externalPlayerID).Scan(&playerID)
 	}
 
-    return internalPlayerID, err
+	if err != nil {
+		return 0, err
+	}
+
+	return playerID, nil
 }
+
 
 // resolveOrCreateUser resolves the internal user record associated with a player.
 //
@@ -297,9 +288,32 @@ func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID str
 //   - Use the returned ID for all gameplay ownership checks
 func resolveOrCreateUser(
 	ctx context.Context,
-	db *sql.DB,
-	playerID int, // INTERNAL players.id
+	tx *sql.Tx,
+	playerID int,
+	username string,
 ) (int, error) {
+
+	var userID int
+
+	err := tx.QueryRowContext(ctx, `
+		SELECT id FROM users WHERE player_id = $1
+	`, playerID).Scan(&userID)
+
+	if err == sql.ErrNoRows {
+		err = tx.QueryRowContext(ctx, `
+			INSERT INTO users (player_id, user_name)
+			VALUES ($1, $2)
+			RETURNING id
+		`, playerID, username).Scan(&userID)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
+}
+
 
 	var userID int
 
@@ -388,10 +402,23 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-
+		username := token.
+		if username == "" {
+			username = token.Email
+		}
+		if username == "" {
+			username = token.ID
+		}
 		// ---- 5. Resolve / create user ----
 		// 5️⃣ Resolve user (same pattern)
 		userDBID, err := resolveOrCreateUser(ctx, db, playerDBID)
+		if err != nil {
+			log.Printf("user resolution failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+		userDBID, err := resolveOrCreateUser(ctx, tx, playerDBID, username)
 		if err != nil {
 			log.Printf("user resolution failed: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
