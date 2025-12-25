@@ -1,10 +1,4 @@
-# IMPORTANT: Do not invoke scripts with `sh`.
-# All scripts rely on bash (pipefail, strict mode).
-
 #!/usr/bin/env bash
-
-# CHQ: Gemini AI created file
-
 set -euo pipefail
 
 SCHEMA_PATH="tmp/schema.sql"
