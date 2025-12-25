@@ -132,8 +132,7 @@ func main() {
 	protectedRoutes := router.PathPrefix("/api").Subrouter()
 	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
 	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
-	// protectedRoutes.HandleFunc("/usercreate", createUser).Methods("POST")
-	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
+ 	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
@@ -438,17 +437,6 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
         // It's called after validation but before processing the request, ensuring the player ID is in the DB.
         // insertPlayerIntoDB(playerID)
 
-		// // Store the user ID and player ID in the request's context
-		// // ctxWithUserID := context.WithValue(ctx, contextKeyUserID, userID)
-		// // ctxWithIDs := context.WithValue(ctxWithUserID, contextKeyPlayerID, playerID)
-        // // ctxWithAdminStatus := context.WithValue(ctxWithIDs, contextKeyIsAdmin, isAdmin)
-		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
-		// // ctx = context.WithValue(ctx, contextKeyUserID, userID) 
-		// ctx = context.WithValue(ctx, contextKeyUserID, userDBID) // int
-
-		// ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)        // int
-		// ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID) // string
-
 		// ---- 7. Store values in request context ---- 
 		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
@@ -456,88 +444,10 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
  
 		// ---- 8. Continue request ----
-		next.ServeHTTP(w, r.WithContext(ctx))
-
+		next.ServeHTTP(w, r.WithContext(ctx)) 
 	})
 }
 
-// func insertPlayerIntoDB(playerID string) {
-// 	// // Using db.Exec() without context here for simplicity, but in a production environment,
-// 	// // consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
-// 	// _, err := db.Exec(query, playerID)
-
-// 	query := `
-// 	INSERT INTO players (player_id, user_name, email) 
-// 	VALUES ($1, $2, $3)
-// 	ON CONFLICT (player_id) DO NOTHING
-// `	
-// 	// Use context for database operation, though for a simple insert, context.Background() is often fine.
-// 	// Using db.Exec() without context here for simplicity, but in a production environment,
-// 	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
-// 	// _, err := db.Exec(query, playerID, "username", "email")
-// 	_, err := db.Exec(
-// 		query,
-// 		playerID,
-// 		playerID,
-// 		playerID+"@example.com",
-// 	)
-
-
-// 	if err != nil {
-// 		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
-// 		// The middleware should not fail the request just because the background
-// 		// operation failed, unless the database error is critical.
-// 		log.Printf("AUTOMATIC REGISTRATION FAILED for Player ID %s: %v", playerID, err)
-// 	} else {
-// 		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Player ID %s ensured in players table.", playerID)
-// 	}
-// } 
-
-// CHQ: Gemini AI refactored function to account for new user table 
-//      access in the database
-// func createCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
-//     var playerCheckpoint Checkpoint
-//     err := json.NewDecoder(r.Body).Decode(&playerCheckpoint)
-//     if err != nil {
-//         http.Error(w, err.Error(), http.StatusBadRequest)
-//         return
-//     }
-
-//     // 1. Check if the user exists in the 'users' table.
-//     var userID int
-//     err = db.QueryRow("SELECT user_id FROM users WHERE user_name = $1", playerCheckpoint.Username).Scan(&userID)
-    
-//     if err == sql.ErrNoRows {
-//         // User does not exist, so create a new user first.
-//         insertUserQuery := "INSERT INTO users (user_name) VALUES ($1) RETURNING user_id"
-//         err = db.QueryRow(insertUserQuery, playerCheckpoint.Username).Scan(&userID)
-//         if err != nil {
-//             http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
-//             return
-//         }
-//     } else if err != nil {
-//         http.Error(w, fmt.Sprintf("Error checking for existing user: %v", err), http.StatusInternalServerError)
-//         return
-//     }
-
-//     // 2. Now that we have a valid userID, insert the oldcheckpoint data.
-//     // The query now inserts into user_id and checkpoint_data.
-//     query := `INSERT INTO gameplay_checkpoints (user_id, checkpoint_data) VALUES ($1, $2) RETURNING checkpoint_id`
-    
-//     var newCheckpointID int
-//     err = db.QueryRow(query, userID, playerCheckpoint.Data).Scan(&newCheckpointID)
-//     if err != nil {
-//         http.Error(w, fmt.Sprintf("Error creating player oldcheckpoint: %v", err), http.StatusInternalServerError)
-//         return
-//     }
-
-//     // Update the returned struct with the new ID.
-//     playerCheckpoint.ID = newCheckpointID
-    
-//     w.Header().Set("Content-Type", "application/json")
-//     w.WriteHeader(http.StatusCreated)
-//     json.NewEncoder(w).Encode(playerCheckpoint)
-// }
 
 // CHQ: Gemini AI refactored function to account for new user table 
 //      access in the database
@@ -1239,52 +1149,6 @@ func deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
 
 // NEW CHECKPOINTS
 
-
-// CHQ: Gemini AI created function
-// StoreNewUser takes a Descope user ID and inserts it into the `users` table.
-// It returns an error if the insertion fails.
-// func StoreNewUser(userID string) error {
-// 	// The SQL INSERT statement. We use a parameterized query ($1)
-// 	// to prevent SQL injection attacks.
-// 	query := "INSERT INTO game_users (checkpoint_id) VALUES ($1)"
-
-// 	// Execute the SQL statement. The Exec method is used for
-// 	// commands that do not return a result set, such as INSERT, UPDATE, or DELETE.
-// 	_, err := db.Exec(query, userID)
-// 	if err != nil {
-// 		// Return a wrapped error to provide more context about the failure.
-// 		return fmt.Errorf("failed to insert new user with ID %s: %w", userID, err)
-// 	}
-
-// 	// If the insertion was successful, return nil for the error.
-// 	fmt.Printf("Successfully stored new user with ID: %s\n", userID)
-// 	return nil
-// }
-
-// CHQ: Gemini AI edited this 
-// Example function to retrieve a user's checkpoints
-// func createUser(w http.ResponseWriter, r *http.Request) {
-// 	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-// 	if !ok || playerID == "" {
-// 		http.Error(w, "Forbidden: player ID not found in session", http.StatusForbidden)
-// 		return
-// 	}
-
-// 	// Correctly handle the error returned by StoreNewUser.
-// 	err := StoreNewUser(playerID)
-// 	if err != nil {
-// 		// Log the error and return an appropriate internal server error status.
-// 		http.Error(w, fmt.Sprintf("Error storing user: %v", err), http.StatusInternalServerError)
-// 		return
-// 	}
-
-// 	// Prepare a success response.
-// 	response := map[string]string{"message": "User created successfully", "userId": playerID}
-
-// 	w.Header().Set("Content-Type", "application/json")
-// 	w.WriteHeader(http.StatusCreated)
-// 	json.NewEncoder(w).Encode(response)
-// }
 
 // CHQ: Gemini AI created function
 // Example function to retrieve a user's checkpoints
