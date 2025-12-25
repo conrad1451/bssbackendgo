@@ -1,3 +1,6 @@
+# IMPORTANT: Do not invoke scripts with `sh`.
+# All scripts rely on bash (pipefail, strict mode).
+
 #!/usr/bin/env bash
 
 # CHQ: Gemini AI created file
@@ -9,12 +12,12 @@ export SCHEMA_PATH
 
 echo "🚦 Running architecture enforcement checks..."
 
-sh scripts/architecture/00_dump_schema.sh
+./scripts/architecture/00_dump_schema.sh
 
 for script in scripts/architecture/*.sh; do
   case "$(basename "$script")" in
     00_dump_schema.sh|run-all.sh) continue ;;
-    *) sh "$script" ;;
+    *) "$script" ;;
   esac
 done
 
