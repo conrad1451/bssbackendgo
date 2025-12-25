@@ -19,9 +19,12 @@ jobs:
 
       - name: Make architecture scripts executable
         run: chmod +x scripts/architecture/*.sh
+        shell: bash
 
       - name: Dump database schema
         run: ./scripts/architecture/00_dump_schema.sh
+        shell: bash
 
       - name: Enforce architecture invariants
         run: ./scripts/architecture/run-all.sh
+        shell: bash

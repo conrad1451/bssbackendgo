@@ -1,5 +1,7 @@
+#!/usr/bin/env bash
+
 # CHQ: Gemini AI created file
-#!/usr/bin/env sh
+
 set -euo pipefail
 
 SCHEMA_PATH="tmp/schema.sql"

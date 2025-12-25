@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 set -euo pipefail
 
 echo "🔍 Checking identity model invariants..."
