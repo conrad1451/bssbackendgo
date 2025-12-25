@@ -4,7 +4,6 @@ go 1.24.4
 
 require (
 	github.com/descope/go-sdk v1.6.16
-	github.com/go-chi/chi/v5 v5.2.3
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/lib/pq v1.10.9

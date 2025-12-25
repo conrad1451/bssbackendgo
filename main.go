@@ -18,8 +18,7 @@ import (
 	_ "github.com/lib/pq"
 
 	// Import the handlers package for CORS middleware
-	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/handlers"
+ 	"github.com/gorilla/handlers"
 )
 
 // Checkpoint represents a checkpoint in the database.
@@ -536,7 +535,9 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
  func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
-	checkpointIDStr := chi.URLParam(r, "checkpointID")
+ 	vars := mux.Vars(r)
+	checkpointIDStr := vars["checkpointID"]
+
 	checkpointID, err := strconv.Atoi(checkpointIDStr)
 	if err != nil || checkpointID <= 0 {
 		writeJSONError(w, http.StatusBadRequest, "Invalid checkpoint ID")
