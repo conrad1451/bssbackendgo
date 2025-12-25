@@ -18,6 +18,7 @@ import (
 	_ "github.com/lib/pq"
 
 	// Import the handlers package for CORS middleware
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/handlers"
 )
 
@@ -485,7 +486,7 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 
 	err = db.QueryRow(query, checkpointID).Scan(
 		&cp.ID,
-		&cp.PlayerID,
+		&cp.UserID,
 		&cp.Title,
 		&cp.Data,
 		&cp.CreatedAt,
