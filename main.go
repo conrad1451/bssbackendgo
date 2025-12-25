@@ -305,7 +305,7 @@ func resolveOrCreateUser(
 
 	// Try to resolve existing user
 	err := db.QueryRowContext(ctx, `
-		SELECT id
+		SELECT user_id
 		FROM users
 		WHERE player_id = $1
 	`, playerID).Scan(&userID)
@@ -322,7 +322,7 @@ func resolveOrCreateUser(
 	err = db.QueryRowContext(ctx, `
 		INSERT INTO users (player_id)
 		VALUES ($1)
-		RETURNING id
+		RETURNING user_id
 	`, playerID).Scan(&userID)
 
 	if err != nil {
