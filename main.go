@@ -230,7 +230,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 
 		// --- Resolve player (internal DB ID) ---
 		var playerDBID int
-		err := db.QueryRow(`
+		err = db.QueryRow(`
 			SELECT id FROM players WHERE player_id = $1
 		`, descopePlayerID).Scan(&playerDBID)
 
@@ -378,69 +378,71 @@ func insertPlayerIntoDB(playerID string) {
 // CHQ: Gemini AI refactored function to account for new user table 
 //      access in the database
 func createCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
-    playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-    if !ok || playerID == "" {
+	playerID, ok := r.Context().Value(contextKeyPlayerID).(int)
+	if !ok || playerID == 0 {
 		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session")
 		return
-    }
+	}
 
-    var requestBody struct {
-        Username       string `json:"user_name"`
-        Data string `json:"checkpoint_data"`
-    }
-    err := json.NewDecoder(r.Body).Decode(&requestBody)
-    if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid JSON request body")
-        return
-    }
+	var input struct {
+		Title string          `json:"title"`
+		Data  json.RawMessage `json:"checkpoint_data"`
+	}
 
-    // 1. Check if the user exists and get their user_id.
-	var userID int
-	err = db.QueryRow("SELECT user_id FROM users WHERE player_id = $1", playerID).Scan(&userID)
-
-	if err == sql.ErrNoRows {
-		// User does not exist, so create a new user first.
-		insertUserQuery := "INSERT INTO users (user_name, player_id) VALUES ($1, $2) RETURNING user_id"
-		err = db.QueryRow(insertUserQuery, requestBody.Username, playerID).Scan(&userID)
-
-		
-		if err != nil {
-		log.Printf("DB error creating checkpoint: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
-        }
-    } else if err != nil {
-		log.Printf("Error creating checkpoint: %v", err)
-		log.Printf("DB error checking for existing user: %v", err)
+	}
+
+	if input.Title == "" {
+		writeJSONError(w, http.StatusBadRequest, "Title is required")
+		return
+	}
+
+	query := `
+		INSERT INTO gameplay_checkpoints (
+			player_id,
+			title,
+			checkpoint_data,
+			created_at,
+			updated_at
+		)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		RETURNING
+			checkpoint_id,
+			player_id,
+			title,
+			checkpoint_data,
+			created_at,
+			updated_at
+	`
+
+	var cp Checkpoint
+
+	err := db.QueryRow(
+		query,
+		playerID,
+		input.Title,
+		input.Data,
+	).Scan(
+		&cp.ID, 
+		&cp.Title,
+		&cp.Data,
+		&cp.CreatedAt,
+		&cp.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Printf("DB error creating checkpoint: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
-    }
+	}
 
-    // 2. Now that we have a valid userID, insert the oldcheckpoint data.
-    insertCheckpointQuery := `
-		INSERT INTO gameplay_checkpoints (user_id, checkpoint_data, player_id) 
-		VALUES ($1, $2, $3) RETURNING checkpoint_id`
-
-    var newCheckpointID int
-	// Pass the retrieved userID, oldcheckpoint data, and the playerID from the token
-	err = db.QueryRow(insertCheckpointQuery, userID, requestBody.Data, playerID).Scan(&newCheckpointID)
-	if err != nil {
-		log.Printf("Error creating checkpoint: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "Error creating checkpoint")
-        return
-    }
-
-    // Return the newly created oldcheckpoint data.
-    responseCheckpoint := Checkpoint{
-        ID:             newCheckpointID,
-        Username:       requestBody.Username,
-        Data: requestBody.Data,
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(responseCheckpoint)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(cp)
 }
+
 
 func createCheckpoint(w http.ResponseWriter, r *http.Request) {
  
@@ -497,8 +499,8 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	// 	&myCheckpoint.PlayerID,
 	// )
 
-	var cp Checkpoint
-	var username string
+	// var cp Checkpoint
+	// var username string
 
 	err = row.Scan(
 		&myCheckpoint.ID,
@@ -648,124 +650,113 @@ func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
 // getAllCheckpointsAsAdmin handles GET requests to retrieve all myCheckpoint records.
 // func getAllCheckpointsAsAdmin(w http.ResponseWriter) {
 func getAllCheckpointsAsAdmin(w http.ResponseWriter, r *http.Request) {
-    var gameplayCheckpoints []Checkpoint
-    
-    // The query now joins with the users table to get the user_name
-    query := `
-        SELECT 
-            g.checkpoint_id, 
-            u.user_name, 
-            g.checkpoint_data, 
-            g.created_at, 
-            g.last_edited_at, 
-            g.player_id 
-        FROM 
-            gameplay_checkpoints g 
-        JOIN 
-            users u ON g.user_id = u.user_id 
-        ORDER BY g.checkpoint_id`
-    
-    rows, err := db.Query(query)
-    if err != nil {
-		log.Printf("DB error retrieving checkpoints: %v", err)
+	isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+	if !ok || !isAdmin {
+		writeJSONError(w, http.StatusForbidden, "Forbidden: admin access required")
+		return
+	}
+
+	var checkpoints []Checkpoint
+
+	query := `
+		SELECT
+			checkpoint_id,
+			player_id,
+			checkpoint_data,
+			created_at,
+			last_edited_at,
+			title
+		FROM gameplay_checkpoints
+		ORDER BY checkpoint_id
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("DB error retrieving checkpoints (admin): %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-        return
-    }
-    defer rows.Close()
+		return
+	}
+	defer rows.Close()
 
-    for rows.Next() {
-        var myCheckpoint Checkpoint
-        var userName string // New variable to hold the user_name from the join
+	for rows.Next() {
+		var cp Checkpoint
 
-        err := rows.Scan(
-            &myCheckpoint.ID,
-            &userName, // Scan into a separate variable
-            &myCheckpoint.Data,	
-            &myCheckpoint.CreatedAt,
-            &myCheckpoint.LastEditedAt,
-            &myCheckpoint.PlayerID,
-        )
-        
-        if err != nil {
-            log.Printf("Error scanning myCheckpoint row: %v", err)
-            continue
-        }
-        
-        // Update the Checkpoint struct with the user_name from the join
-        myCheckpoint.Username = userName
-        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-    }
+		err := rows.Scan(
+			&cp.ID,
+ 			&cp.Data,
+			&cp.CreatedAt,
+			&cp.UpdatedAt,
+			&cp.Title,
+		)
+		if err != nil {
+			log.Printf("Error scanning admin checkpoint row: %v", err)
+			continue
+		}
 
-    if err = rows.Err(); err != nil {
-		log.Printf("DB error iterating over checkpoint rows: %v", err)
+		checkpoints = append(checkpoints, cp)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("DB iteration error (admin): %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-        return
-    }
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(gameplayCheckpoints)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(checkpoints)
 }
+
 
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
 func getAllCheckpointsAsPlayer(w http.ResponseWriter, r *http.Request) {
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" { 
-		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
-        return 
+	playerID, ok := r.Context().Value(contextKeyPlayerID).(int)
+	if !ok {
+		writeJSONError(w, http.StatusForbidden, "Forbidden: player not authenticated")
+		return
 	}
 
 	var gameplayCheckpoints []Checkpoint
 
-    // The query now joins with the users table to get the user_name
-    query := `
-        SELECT 
-            g.checkpoint_id, 
-            u.user_name, 
-            g.checkpoint_data, 
-            g.created_at, 
-            g.last_edited_at, 
-            g.player_id 
-        FROM 
-            gameplay_checkpoints g 
-        JOIN 
-            users u ON g.user_id = u.user_id 
-		WHERE
-			g.player_id = $1 
-        ORDER BY g.checkpoint_id`
-    
-    rows, err := db.Query(query, playerID)
-    if err != nil {		
+	query := `
+		SELECT
+			checkpoint_id,
+			checkpoint_data,
+			created_at,
+			last_edited_at,
+			title
+		FROM gameplay_checkpoints
+		WHERE player_id = $1
+		ORDER BY checkpoint_id
+	`
+
+	rows, err := db.Query(query, playerID)
+	if err != nil {
 		log.Printf("DB error retrieving checkpoints: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
- 		return
-    }
-    defer rows.Close()
+		return
+	}
+	defer rows.Close()
 
-    for rows.Next() {
-        var myCheckpoint Checkpoint
-        var userName string // New variable to hold the user_name from the join
+	for rows.Next() {
+		var cp Checkpoint
 
-        err := rows.Scan(
-            &myCheckpoint.ID,
-            &userName, // Scan into a separate variable
-            &myCheckpoint.Data,
-            &myCheckpoint.CreatedAt,
-            &myCheckpoint.LastEditedAt,
-            &myCheckpoint.PlayerID,
-        )
-        
-        if err != nil {
-            log.Printf("Error scanning myCheckpoint row: %v", err)
-            continue
-        }
-        
-        // Update the Checkpoint struct with the user_name from the join
-        myCheckpoint.Username = userName
-        gameplayCheckpoints = append(gameplayCheckpoints, myCheckpoint)
-    }
+		err := rows.Scan(
+			&cp.ID,
+			&cp.Data,
+			&cp.CreatedAt,
+			&cp.UpdatedAt,
+			&cp.Title,
+		)
+		if err != nil {
+			log.Printf("Error scanning checkpoint row: %v", err)
+			continue
+		}
 
-	if err = rows.Err(); err != nil {
-		log.Printf("DB error iterating over checkpoints: %v", err)
+		gameplayCheckpoints = append(gameplayCheckpoints, cp)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("DB iteration error: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
