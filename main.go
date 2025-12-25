@@ -461,81 +461,52 @@ func createCheckpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // CHQ: Gemini AI refactored to account for fk of user_name and user table
-func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
-
-	vars := mux.Vars(r)
-	checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid myCheckpoint ID")
+ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
+	checkpointIDStr := chi.URLParam(r, "checkpointID")
+	checkpointID, err := strconv.Atoi(checkpointIDStr)
+	if err != nil || checkpointID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "Invalid checkpoint ID")
 		return
 	}
 
-	var myCheckpoint Checkpoint
-	var userName string // New variable to hold the user_name from the join
-
 	query := `
-		SELECT 
-			g.checkpoint_id, 
-			u.user_name, 
-			    // g.player_id,/
-			g.checkpoint_data, 
-			g.created_at, 
-			g.last_edited_at, 
-			g.player_id 
-		FROM 
-			gameplay_checkpoints g 
-		JOIN 
-			users u ON g.user_id = u.user_id 
-		WHERE 
-			g.checkpoint_id = $1`
+		SELECT
+			checkpoint_id,
+			player_id,
+			title,
+			checkpoint_data,
+			created_at,
+			updated_at
+		FROM gameplay_checkpoints
+		WHERE checkpoint_id = $1
+	`
 
-	row := db.QueryRow(query, checkpoint_id)
- 	// err = row.Scan(
-	// 	&myCheckpoint.ID,
-	// 	&userName, // Scan into a separate variable
-	// 	&myCheckpoint.Data,
-	// 	&myCheckpoint.CreatedAt,
-	// 	&myCheckpoint.LastEditedAt,
-	// 	&myCheckpoint.PlayerID,
-	// )
+	var cp Checkpoint
 
-	// var cp Checkpoint
-	// var username string
-
-	err = row.Scan(
-		&myCheckpoint.ID,
-		&userName, // Scan into a separate variable
-		&myCheckpoint.Data,
-		&myCheckpoint.CreatedAt,
-		&myCheckpoint.UpdatedAt,
-		&myCheckpoint.Title,
+	err = db.QueryRow(query, checkpointID).Scan(
+		&cp.ID,
+		&cp.PlayerID,
+		&cp.Title,
+		&cp.Data,
+		&cp.CreatedAt,
+		&cp.UpdatedAt,
 	)
-
-// err := row.Scan(
-// 	&cp.ID,
-// 	&cp.UserID,
-// 	&cp.PlayerID,
-// 	&cp.Data,
-// 	&cp.CreatedAt,
-// 	&cp.UpdatedAt,
-// 	&username,
-// )
 
 	if err == sql.ErrNoRows {
 		writeJSONError(w, http.StatusNotFound, "Checkpoint not found")
 		return
-	} else if err != nil {
-		log.Printf("DB error retrieving checkpoint %d: %v", checkpoint_id, err)
+	}
+
+	if err != nil {
+		log.Printf("DB error retrieving checkpoint %d: %v", checkpointID, err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	
-	// Update the Checkpoint struct with the user_name from the join
-	myCheckpoint.Username = userName
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(myCheckpoint)
+	json.NewEncoder(w).Encode(cp)
 }
+
 
 // getStudent handles GET requests to retrieve a single student by ID, but also checks for ownership.
 func getCheckpointAsPlayer(w http.ResponseWriter, r *http.Request) {
