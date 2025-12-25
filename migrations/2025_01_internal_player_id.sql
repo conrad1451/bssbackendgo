@@ -1,3 +1,6 @@
+-- 2025_01_internal_player_id.sql
+-- Introduces internal player ID (not yet enforced as PK)
+
 -- ============================================================
 -- UP MIGRATION
 -- Convert players to use internal integer PK
