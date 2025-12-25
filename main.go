@@ -196,10 +196,148 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(favicon)
 }
 
+// resolveOrCreatePlayer resolves the internal player record for an authenticated user.
+//
+// This function enforces the system’s identity boundary:
+//
+//   - External identity (Descope) is used ONLY for authentication
+//   - Internal identity (players.id) is used for authorization and ownership
+//
+// Behavior:
+//   - If a player row already exists for the given external Descope ID,
+//     its internal primary key (players.id) is returned.
+//   - If no such row exists, a new player row is created and its internal ID
+//     is returned.
+//
+// Invariants:
+//   - The external Descope ID is never used as a database primary key.
+//   - The returned value is always an internal integer ID.
+//   - This function must be called only after session validation succeeds.
+//
+// Parameters:
+//   - ctx: request-scoped context (must not be nil)
+//   - db: database connection
+//   - externalPlayerID: Descope-assigned user identifier (string)
+//
+// Returns:
+//   - int: internal player ID (players.id)
+//   - error: non-nil if resolution or creation fails
+//
+// Callers MUST:
+//   - Store the returned ID in request context
+//   - Use the returned ID for all authorization and ownership checks
+// func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (string, error) {
+func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (int, error) {
+
+    // var internalPlayerID string
+    var internalPlayerID int
+
+    // err := db.QueryRow(`
+    //     SELECT id
+    //     FROM players
+    //     WHERE player_id = $1
+    // `, externalPlayerID).Scan(&internalPlayerID)
+
+    // if err == sql.ErrNoRows {
+    //     err = db.QueryRow(`
+    //         INSERT INTO players (player_id)
+    //         VALUES ($1)
+    //         RETURNING id
+    //     `, externalPlayerID).Scan(&internalPlayerID)
+    // }
+
+	
+	err := db.QueryRowContext(ctx, `
+		SELECT id
+		FROM players
+		WHERE player_id = $1
+	`, externalPlayerID).Scan(&internalPlayerID)
+
+	if err == sql.ErrNoRows {
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO players (player_id)
+			VALUES ($1)
+			RETURNING id
+		`, externalPlayerID).Scan(&internalPlayerID)
+	}
+
+    return internalPlayerID, err
+}
+
+// resolveOrCreateUser resolves the internal user record associated with a player.
+//
+// This function represents the second layer of identity resolution:
+//
+//   - players represent authenticated identities (one per Descope user)
+//   - users represent application-level entities that own gameplay data
+//
+// Behavior:
+//   - If a user row already exists for the given internal player ID,
+//     its primary key (users.id) is returned.
+//   - If no such row exists, a new user row is created and its ID is returned.
+//
+// Invariants:
+//   - The input playerID MUST be an internal database ID (players.id).
+//   - External identity values (e.g. Descope IDs) must never be passed here.
+//   - The returned value is always an internal integer ID.
+//   - At most one user row exists per player.
+//
+// Parameters:
+//   - ctx: request-scoped context (must not be nil)
+//   - db: database connection
+//   - playerID: internal player ID (players.id)
+//
+// Returns:
+//   - int: internal user ID (users.id)
+//   - error: non-nil if resolution or creation fails
+//
+// Callers MUST:
+//   - Call this only after resolveOrCreatePlayer succeeds
+//   - Store the returned user ID in request context
+//   - Use the returned ID for all gameplay ownership checks
+func resolveOrCreateUser(
+	ctx context.Context,
+	db *sql.DB,
+	playerID int, // INTERNAL players.id
+) (int, error) {
+
+	var userID int
+
+	// Try to resolve existing user
+	err := db.QueryRowContext(ctx, `
+		SELECT id
+		FROM users
+		WHERE player_id = $1
+	`, playerID).Scan(&userID)
+
+	if err == nil {
+		return userID, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+
+	// Create user if not exists
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO users (player_id)
+		VALUES ($1)
+		RETURNING id
+	`, playerID).Scan(&userID)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
+}
+
 // CHQ: Gemini AI created function
 // sessionValidationMiddleware is a middleware to validate the Descope session token.
 func sessionValidationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		// 1️⃣ Read Authorization header
 		sessionToken := r.Header.Get("Authorization")
 		if sessionToken == "" {
 			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: No session token provided")
@@ -209,6 +347,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		sessionToken = strings.TrimPrefix(sessionToken, "Bearer ") 
 		ctx := r.Context()
 
+		// 2️⃣ Validate Descope session	
 		authorized, token, err := descopeClient.Auth.ValidateSessionWithToken(ctx, sessionToken)
 		if err != nil || !authorized {
 			log.Printf("Session validation failed: %v", err)
@@ -220,7 +359,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
 		// ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 
-
+		// 3️⃣ Extract external player ID
 		descopePlayerID := token.ID
 		if descopePlayerID == "" {
 			writeJSONError(w, http.StatusUnauthorized, "Unauthorized: Player ID missing")
@@ -229,46 +368,43 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 
 		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
 
-		// --- Resolve player (internal DB ID) ---
-		var playerDBID int
-		err = db.QueryRow(`
-			SELECT id FROM players WHERE player_id = $1
-		`, descopePlayerID).Scan(&playerDBID)
-
-		if err == sql.ErrNoRows {
-			err = db.QueryRow(`
-				INSERT INTO players (player_id)
-				VALUES ($1)
-				RETURNING id
-			`, descopePlayerID).Scan(&playerDBID)
+		// ---- 3. Begin transaction ----
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{
+			Isolation: sql.LevelReadCommitted,
+		})
+		if err != nil {
+			log.Printf("Failed to begin transaction: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
 		}
 
+		// Ensure rollback on any failure
+		defer tx.Rollback()
+		
+		// ---- 4. Resolve / create player ----
+		playerDBID, err := resolveOrCreatePlayer(ctx, db, descopePlayerID)
 		if err != nil {
 			log.Printf("player resolution failed: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
-		// --- Resolve user ---
-		var userDBID int
-		err = db.QueryRow(`
-			SELECT id FROM users WHERE player_id = $1
-		`, playerDBID).Scan(&userDBID)
-
-		if err == sql.ErrNoRows {
-			err = db.QueryRow(`
-				INSERT INTO users (player_id)
-				VALUES ($1)
-				RETURNING id
-			`, playerDBID).Scan(&userDBID)
-		}
-
+		// ---- 5. Resolve / create user ----
+		// 5️⃣ Resolve user (same pattern)
+		userDBID, err := resolveOrCreateUser(ctx, db, playerDBID)
 		if err != nil {
 			log.Printf("user resolution failed: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
+		
+		// ---- 6. Commit transaction ----
+		if err := tx.Commit(); err != nil {
+			log.Printf("Transaction commit failed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 
 		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
         // This is where a successfully authenticated user is automatically added to the players table.
@@ -286,49 +422,49 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		// ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)        // int
 		// ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID) // string
 
-		
-		// --- Store context ---
+		// ---- 7. Store values in request context ---- 
 		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
 		ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)
 		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
  
+		// ---- 8. Continue request ----
 		next.ServeHTTP(w, r.WithContext(ctx))
 
 	})
 }
 
-func insertPlayerIntoDB(playerID string) {
-	// // Using db.Exec() without context here for simplicity, but in a production environment,
-	// // consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
-	// _, err := db.Exec(query, playerID)
+// func insertPlayerIntoDB(playerID string) {
+// 	// // Using db.Exec() without context here for simplicity, but in a production environment,
+// 	// // consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+// 	// _, err := db.Exec(query, playerID)
 
-	query := `
-	INSERT INTO players (player_id, user_name, email) 
-	VALUES ($1, $2, $3)
-	ON CONFLICT (player_id) DO NOTHING
-`	
-	// Use context for database operation, though for a simple insert, context.Background() is often fine.
-	// Using db.Exec() without context here for simplicity, but in a production environment,
-	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
-	// _, err := db.Exec(query, playerID, "username", "email")
-	_, err := db.Exec(
-		query,
-		playerID,
-		playerID,
-		playerID+"@example.com",
-	)
+// 	query := `
+// 	INSERT INTO players (player_id, user_name, email) 
+// 	VALUES ($1, $2, $3)
+// 	ON CONFLICT (player_id) DO NOTHING
+// `	
+// 	// Use context for database operation, though for a simple insert, context.Background() is often fine.
+// 	// Using db.Exec() without context here for simplicity, but in a production environment,
+// 	// consider using db.ExecContext(ctx, query, playerID) for better cancellation/timeout handling.
+// 	// _, err := db.Exec(query, playerID, "username", "email")
+// 	_, err := db.Exec(
+// 		query,
+// 		playerID,
+// 		playerID,
+// 		playerID+"@example.com",
+// 	)
 
 
-	if err != nil {
-		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
-		// The middleware should not fail the request just because the background
-		// operation failed, unless the database error is critical.
-		log.Printf("AUTOMATIC REGISTRATION FAILED for Player ID %s: %v", playerID, err)
-	} else {
-		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Player ID %s ensured in players table.", playerID)
-	}
-} 
+// 	if err != nil {
+// 		// IMPORTANT: Use log.Printf, not http.Error, as we are in middleware.
+// 		// The middleware should not fail the request just because the background
+// 		// operation failed, unless the database error is critical.
+// 		log.Printf("AUTOMATIC REGISTRATION FAILED for Player ID %s: %v", playerID, err)
+// 	} else {
+// 		log.Printf("AUTOMATIC REGISTRATION SUCCESS: Player ID %s ensured in players table.", playerID)
+// 	}
+// } 
 
 // CHQ: Gemini AI refactored function to account for new user table 
 //      access in the database
