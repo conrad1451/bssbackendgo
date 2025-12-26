@@ -142,6 +142,14 @@ func main() {
 
 	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints).Methods("GET")
 
+
+	admin := protectedRoutes.PathPrefix("/admin").Subrouter()
+	admin.Use(requireAdminMiddleware)
+
+	admin.HandleFunc("/checkpoints", getAllCheckpointsAsAdmin).Methods("GET")
+
+
+
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
 		"https://studentfrontendreact.vercel.app",
@@ -321,6 +329,19 @@ func resolveOrCreateUser(
 	}
 
 	return userID, nil
+}
+
+func requireAdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		isAdmin, ok := r.Context().Value(contextKeyIsAdmin).(bool)
+		if !ok || !isAdmin {
+			writeJSONError(w, http.StatusForbidden, "Forbidden: admin access required")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // CHQ: Gemini AI created function
