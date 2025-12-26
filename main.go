@@ -18,7 +18,7 @@ import (
 	_ "github.com/lib/pq"
 
 	// Import the handlers package for CORS middleware
- 	"github.com/gorilla/handlers"
+	"github.com/gorilla/handlers"
 )
 
 // Checkpoint represents a checkpoint in the database.
@@ -126,6 +126,9 @@ func main() {
 	// All routes now go through the mux router, including static files
 	router.HandleFunc("/", helloHandler)
 	router.HandleFunc("/favicon.ico", faviconHandler)
+
+	router.HandleFunc("/health", healthHandler).Methods("GET")
+
 
 	// Protected routes (require session validation)
 	protectedRoutes := router.PathPrefix("/api").Subrouter()
@@ -400,7 +403,8 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		username := token.
+
+		username := token.ID
 		if username == "" {
 			username = token.Email
 		}
