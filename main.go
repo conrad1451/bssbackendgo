@@ -140,7 +140,7 @@ func main() {
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", deleteCheckpoint).Methods("DELETE")
 
-	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints,).Methods("GET")
+	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints).Methods("GET")
 
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
