@@ -15,6 +15,7 @@ import (
 	// PostgreSQL driver
 	"github.com/descope/go-sdk/descope/client"
 	"github.com/gorilla/mux"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 
 	// Import the handlers package for CORS middleware
@@ -379,6 +380,20 @@ func resolveOrCreateUser(
 		return 0, err
 	}
 
+	// Generate username now that userID exists
+	generated := generateUsername("", userID)
+
+	// Persist username
+	_, err = db.ExecContext(ctx, `
+		UPDATE users
+		SET user_name = $1
+		WHERE user_id = $2
+	`, generated, userID)
+
+	if err != nil {
+		return 0, err
+	}
+	
 	return userID, nil
 }
 
@@ -876,6 +891,16 @@ func getAllBSSCheckpoints(w http.ResponseWriter, r *http.Request){
 	}
 }
 
+// CHQ: ChatGPT generated
+func generateUsername(base string, userID int) string {
+	base = strings.ToLower(strings.TrimSpace(base))
+	if base == "" {
+		base = "player"
+	}
+	return fmt.Sprintf("%s-%06d", base, userID%1_000_000)
+}
+
+
 func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     // 1. Authorization: Get the ID of the logged-in player from the context.
     playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
@@ -909,13 +934,25 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     // Ensure db is available in scope.
     result, err := db.Exec(query, req.Username, req.Email, playerID)
 
-    if err != nil {
-        log.Printf("Error executing SQL update for player ID %s: %v", playerID, err)
-        // Ensure the error response is JSON for the frontend to handle gracefully.
+    // if err != nil {
+    //     log.Printf("Error executing SQL update for player ID %s: %v", playerID, err)
+    //     // Ensure the error response is JSON for the frontend to handle gracefully.
+	// 	log.Printf("DB error updating player: %v", err)
+	// 	writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+	// 	return 
+    // }
+
+	// CHQ: ChatGPT wrapped with unique-constraint handling
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			writeJSONError(w, http.StatusConflict, "username already taken")
+			return
+		}
+
 		log.Printf("DB error updating player: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-		return 
-    }
+		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
 
     // 4. Check Rows Affected
     rowsAffected, err := result.RowsAffected()
