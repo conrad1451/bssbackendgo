@@ -246,7 +246,7 @@ func checkUsername(w http.ResponseWriter, r *http.Request) {
 }
 
  
-// CHQ: Gemini AI created
+// CHQ: ChatGPT created
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
