@@ -420,13 +420,6 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		userDBID, err := resolveOrCreateUser(ctx, tx, playerDBID, username)
-		if err != nil {
-			log.Printf("user resolution failed: %v", err)
-			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-
 		
 		// ---- 6. Commit transaction ----
 		if err := tx.Commit(); err != nil {
