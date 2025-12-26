@@ -135,6 +135,9 @@ func main() {
 	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
 	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
  	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
+
+	protectedRoutes.HandleFunc("/check-username", checkUsername).Methods("GET")
+
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
@@ -203,6 +206,54 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Write the file content to the response
 	w.Write(favicon)
+}
+
+// CHQ: Gemini AI created
+func checkUsername(w http.ResponseWriter, r *http.Request) {
+	username := strings.TrimSpace(r.URL.Query().Get("username"))
+
+	if username == "" {
+		writeJSONError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+
+	// Optional: enforce formatting rules here
+	if len(username) < 3 || len(username) > 20 {
+		writeJSONResponse(w, http.StatusOK, map[string]bool{
+			"available": false,
+		})
+		return
+	}
+
+	var exists bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM players
+			WHERE LOWER(user_name) = LOWER($1)
+		)
+	`, username).Scan(&exists)
+
+	if err != nil {
+		log.Printf("DB error checking username: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, map[string]bool{
+		"available": !exists,
+	})
+}
+
+ 
+// CHQ: Gemini AI created
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+	})
 }
 
 // resolveOrCreatePlayer resolves the internal player record for an authenticated user.
