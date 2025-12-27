@@ -62,6 +62,7 @@ const contextKeyPlayerID contextKey = "playerID" // int (DB)
 const contextKeyExternalPlayerID contextKey = "externalPlayerID" // string (Descope)
 const contextKeyUserID contextKey = "userID" // int (DBs)
 
+const contextKeyUsername contextKey = "username"
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
@@ -138,6 +139,7 @@ func main() {
  	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 
 	protectedRoutes.HandleFunc("/check-username", checkUsername).Methods("GET")
+	protectedRoutes.HandleFunc("/me", getMe).Methods("GET")
 
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
@@ -353,52 +355,43 @@ func resolveOrCreateUser(
 	ctx context.Context,
 	db *sql.DB,
 	playerID int,
-) (int, error) {
+) (int, string, error) {
 
 	var userID int
+	var username sql.NullString
 
-	// Try to resolve existing user
 	err := db.QueryRowContext(ctx, `
-		SELECT user_id
+		SELECT user_id, user_name
 		FROM users
 		WHERE player_id = $1
-	`, playerID).Scan(&userID)
+	`, playerID).Scan(&userID, &username)
 
-	if err == nil {
-		return userID, nil
+	if err == sql.ErrNoRows {
+		// create user
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO users (player_id)
+			VALUES ($1)
+			RETURNING user_id
+		`, playerID).Scan(&userID)
+		if err != nil {
+			return 0, "", err
+		}
+
+		// username intentionally empty
+		return userID, "", nil
 	}
-
-	if err != sql.ErrNoRows {
-		return 0, err
-	}
-
-	// Create user if not exists
-	err = db.QueryRowContext(ctx, `
-		INSERT INTO users (player_id)
-		VALUES ($1)
-		RETURNING user_id
-	`, playerID).Scan(&userID)
 
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
-	// Generate username now that userID exists
-	generated := generateUsername("", userID)
-
-	// Persist username
-	_, err = db.ExecContext(ctx, `
-		UPDATE users
-		SET user_name = $1
-		WHERE user_id = $2
-	`, generated, userID)
-
-	if err != nil {
-		return 0, err
+	if username.Valid {
+		return userID, username.String, nil
 	}
-	
-	return userID, nil
+
+	return userID, "", nil
 }
+
 
 func requireAdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -472,21 +465,16 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		username := token.ID
-		if username == "" {
-			username = token.Email
-		}
-		if username == "" {
-			username = token.ID
-		}
+ 
 		// ---- 5. Resolve / create user ----
 		// 5️⃣ Resolve user (same pattern)
-		userDBID, err := resolveOrCreateUser(ctx, db, playerDBID)
+		userDBID, username, err := resolveOrCreateUser(ctx, db, playerDBID)
 		if err != nil {
 			log.Printf("user resolution failed: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
+
 
 		
 		// // ---- 6. Commit transaction ----
@@ -506,6 +494,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
 		ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)
 		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
+		ctx = context.WithValue(ctx, contextKeyUsername, username)
  
 		// ---- 8. Continue request ----
 		next.ServeHTTP(w, r.WithContext(ctx)) 
@@ -903,6 +892,17 @@ func generateUsername(base string, userID int) string {
 	return fmt.Sprintf("%s-%06d", base, userID%1_000_000)
 }
 
+func getMe(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(contextKeyUserID).(int)
+	username, _ := r.Context().Value(contextKeyUsername).(string)
+
+	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"user_id":     userID,
+		"username":    username,
+		"hasUsername": username != "",
+	})
+}
+
 
 func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     // 1. Authorization: Get the ID of the logged-in player from the context.
@@ -931,11 +931,18 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
     // CHQ: Gemini AI fixed the line below for correct name for id field
 	// FIX: Changed "id" to "player_id" to match the actual database column name.
 
-	// CHQ: Gemini AI corrected query
-	query := `UPDATE players SET user_name = $1, email = $2 WHERE player_id = $3`    
-    // Note: We are using the fields from the unmarshalled 'req' struct.
-    // Ensure db is available in scope.
-    result, err := db.Exec(query, req.Username, req.Email, playerID)
+	// // CHQ: Gemini AI corrected query
+	// query := `UPDATE players SET user_name = $1, email = $2 WHERE player_id = $3`    
+    // // Note: We are using the fields from the unmarshalled 'req' struct.
+    // // Ensure db is available in scope.
+    // result, err := db.Exec(query, req.Username, req.Email, playerID)
+
+	query := `
+	UPDATE users
+	SET user_name = $1
+	WHERE player_id = $2`
+	_, err = db.Exec(query, req.Username, playerID)
+
 
     // if err != nil {
     //     log.Printf("Error executing SQL update for player ID %s: %v", playerID, err)
@@ -957,19 +964,21 @@ func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-    // 4. Check Rows Affected
-    rowsAffected, err := result.RowsAffected()
-    if err != nil {
-        log.Printf("Error checking rows affected for player ID %s: %v", playerID, err)
+	// CHQ: Gemini AI removed since no longer needed
+	// - unique constraint + auth already guarantees correctness.
+    // // 4. Check Rows Affected
+    // rowsAffected, err := result.RowsAffected()
+    // if err != nil {
+    //     log.Printf("Error checking rows affected for player ID %s: %v", playerID, err)
 
-		writeJSONError(w, http.StatusInternalServerError, "Error confirming profile update.")
-        return
-    }
-    if rowsAffected == 0 {
-        log.Printf("Update attempted for player ID %s, but 0 rows affected. Profile not found?", playerID)
-        writeJSONError(w, http.StatusNotFound, "Authenticated player profile not found or no changes made")
-        return
-    }
+	// 	writeJSONError(w, http.StatusInternalServerError, "Error confirming profile update.")
+    //     return
+    // }
+    // if rowsAffected == 0 {
+    //     log.Printf("Update attempted for player ID %s, but 0 rows affected. Profile not found?", playerID)
+    //     writeJSONError(w, http.StatusNotFound, "Authenticated player profile not found or no changes made")
+    //     return
+    // }
 
     // 5. Success Response
     w.Header().Set("Content-Type", "application/json")
