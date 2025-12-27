@@ -159,6 +159,8 @@ func main() {
 		"https://studentfrontendreact.vercel.app",
 		"http://localhost:5173",
 		"http://localhost:5174",
+		"https://*.descope.com",
+		"https://static.descope.com", 
 	}
 
 	// --- CORS Setup ---
