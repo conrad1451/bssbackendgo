@@ -66,6 +66,12 @@ const contextKeyUsername contextKey = "username"
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
 
+// mustGetEnv retrieves the value of the required environment variable named by key.
+//
+// If the environment variable is not set or is empty, the function logs a fatal
+// error and terminates the program. This function is intended for mandatory
+// configuration values that the application cannot run without, such as
+// database connection strings or API credentials.
 func mustGetEnv(key string) string {
 	val := os.Getenv(key)
 	if val == "" {
@@ -74,6 +80,16 @@ func mustGetEnv(key string) string {
 	return val
 }
 
+
+// writeJSONError writes a standardized JSON error response.
+//
+// The function sets the "Content-Type" header to "application/json", writes the
+// provided HTTP status code, and encodes a response body containing a success
+// flag set to false and an optional error message.
+//
+// This helper is intended for consistent error responses across HTTP handlers.
+// JSON encoding errors are intentionally ignored, as error responses should
+// not fail due to secondary encoding issues.
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -84,11 +100,21 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 }
 
 
+
+// writeJSONResponse writes a JSON-encoded HTTP response with the given status code.
+//
+// The function sets the "Content-Type" header to "application/json", writes the
+// provided HTTP status code, and encodes the given payload as JSON in the response body.
+//
+// The payload may be any value supported by json.Encoder (structs, maps, slices, etc.).
+// Encoding errors are intentionally ignored, as this helper is intended for simple,
+// best-effort response writing in HTTP handlers.
 func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
+
 
 
 func main() {
@@ -136,17 +162,24 @@ func main() {
 	protectedRoutes := router.PathPrefix("/api").Subrouter()
 	protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
 	// protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
- 	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
+	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints).Methods("GET")
+	protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 
-	protectedRoutes.HandleFunc("/check-username", checkUsername).Methods("GET")
+	// CHQ: no longer needed since /username already guarntees correctness
+	// - Authenticated user
+	// - Normalized username
+	// - DB unique constraint
+	// - Proper HTTP status codes
+	// protectedRoutes.HandleFunc("/check-username", checkUsername).Methods("GET")
+	protectedRoutes.HandleFunc("/username", setUsername).Methods("POST")
 	protectedRoutes.HandleFunc("/me", getMe).Methods("GET")
 
+	// --- Disabled until editor UI is ready ---
 	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllCheckpoints).Methods("GET")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpoint).Methods("PUT")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", updateCheckpointALT).Methods("PATCH")
 	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", deleteCheckpoint).Methods("DELETE")
 
-	protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints).Methods("GET")
 
 
 	admin := protectedRoutes.PathPrefix("/admin").Subrouter()
@@ -213,41 +246,119 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(favicon)
 }
 
-// CHQ: Gemini AI created
-func checkUsername(w http.ResponseWriter, r *http.Request) {
-	username := strings.TrimSpace(r.URL.Query().Get("username"))
+// // CHQ: Gemini AI created
+// func checkUsername(w http.ResponseWriter, r *http.Request) {
+// 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 
-	if username == "" {
-		writeJSONError(w, http.StatusBadRequest, "username is required")
-		return
-	}
+// 	if username == "" {
+// 		writeJSONError(w, http.StatusBadRequest, "username is required")
+// 		return
+// 	}
 
-	// Optional: enforce formatting rules here
-	if len(username) < 3 || len(username) > 20 {
-		writeJSONResponse(w, http.StatusOK, map[string]bool{
-			"available": false,
-		})
-		return
-	}
+// 	// Optional: enforce formatting rules here
+// 	if len(username) < 3 || len(username) > 20 {
+// 		writeJSONResponse(w, http.StatusOK, map[string]bool{
+// 			"available": false,
+// 		})
+// 		return
+// 	}
 
-	var exists bool
-	err := db.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM players
-			WHERE LOWER(user_name) = LOWER($1)
-		)
-	`, username).Scan(&exists)
+// 	var exists bool
+// 	err := db.QueryRow(`
+// 		SELECT EXISTS (
+// 			SELECT 1
+// 			FROM players
+// 			WHERE LOWER(user_name) = LOWER($1)
+// 		)
+// 	`, username).Scan(&exists)
 
-	if err != nil {
-		log.Printf("DB error checking username: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
+// 	if err != nil {
+// 		log.Printf("DB error checking username: %v", err)
+// 		writeJSONError(w, http.StatusInternalServerError, "internal error")
+// 		return
+// 	}
 
-	writeJSONResponse(w, http.StatusOK, map[string]bool{
-		"available": !exists,
-	})
+// 	writeJSONResponse(w, http.StatusOK, map[string]bool{
+// 		"available": !exists,
+// 	})
+// }
+
+// setUsername handles requests to set or update the authenticated user's username.
+//
+// The handler expects a JSON request body of the form:
+//
+//	{ "username": "desired_name" }
+//
+// Authentication context must provide an external player identifier via
+// contextKeyExternalPlayerID. If no corresponding player record exists, one is
+// created automatically.
+//
+// Behavior:
+//   - Validates that the request body contains a non-empty username
+//   - Ensures a player record exists for the authenticated user
+//   - Inserts or updates the user's username for that player
+//   - Enforces username uniqueness at the database level
+//
+// Responses:
+//   - 200 OK on success
+//   - 400 Bad Request if the JSON is invalid or the username is empty
+//   - 409 Conflict if the username is already taken
+//   - 500 Internal Server Error for unexpected database or server errors
+func setUsername(w http.ResponseWriter, r *http.Request) {
+  externalID := r.Context().Value(contextKeyExternalPlayerID).(string)
+
+  var body struct {
+    Username string `json:"username"`
+  }
+
+  if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+    writeJSONError(w, 400, "invalid json")
+    return
+  }
+
+  username := strings.TrimSpace(body.Username)
+  if username == "" {
+    writeJSONError(w, 400, "username required")
+    return
+  }
+
+  // ensure player exists
+  var playerID int
+  err := db.QueryRow(`
+    SELECT id FROM players WHERE player_id = $1
+  `, externalID).Scan(&playerID)
+
+  if err == sql.ErrNoRows {
+    err = db.QueryRow(`
+      INSERT INTO players (player_id)
+      VALUES ($1)
+      RETURNING id
+    `, externalID).Scan(&playerID)
+  }
+
+  if err != nil {
+    writeJSONError(w, 500, "internal error")
+    return
+  }
+
+  // upsert user + username
+  _, err = db.Exec(`
+    INSERT INTO users (player_id, user_name)
+    VALUES ($1, $2)
+    ON CONFLICT (player_id)
+    DO UPDATE SET user_name = EXCLUDED.user_name
+  `, playerID, username)
+
+  if err != nil {
+    if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+      writeJSONError(w, 409, "username already taken")
+      return
+    }
+    writeJSONError(w, 500, "internal error")
+    return
+  }
+
+  writeJSONResponse(w, 200, map[string]bool{"success": true})
 }
 
  
@@ -392,7 +503,19 @@ func resolveOrCreateUser(
 	return userID, "", nil
 }
 
-
+// requireAdminMiddleware wraps an HTTP handler and enforces that the request
+// is made by an authenticated admin user.
+//
+// The middleware expects a boolean admin flag to be present in the request
+// context under contextKeyIsAdmin. If the value is missing or false, the
+// request is rejected.
+//
+// Behavior:
+//   - Allows the request to proceed if the user is an admin
+//   - Returns 403 Forbidden with a JSON error response otherwise
+//
+// This middleware should be applied after authentication and context
+// population middleware that sets contextKeyIsAdmin.
 func requireAdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -407,7 +530,35 @@ func requireAdminMiddleware(next http.Handler) http.Handler {
 }
 
 // CHQ: Gemini AI created function
-// sessionValidationMiddleware is a middleware to validate the Descope session token.
+// sessionValidationMiddleware validates an incoming request's Descope session
+// token and enriches the request context with authenticated user information.
+//
+// The middleware performs the following steps:
+//
+//  1. Extracts a Bearer token from the Authorization header
+//  2. Validates the session using the Descope Auth API
+//  3. Extracts the external Descope player ID from the validated token
+//  4. Determines whether the user has the "Game Admin" role
+//  5. Stores authentication and authorization data in the request context
+//
+// On success, the middleware adds the following values to the request context:
+//   - contextKeyExternalPlayerID: the Descope player ID (string)
+//   - contextKeyIsAdmin: whether the user has the "Game Admin" role (bool)
+//   - contextKeyPlayerID: the internal player database ID (int)
+//
+// If validation fails at any step, the request is terminated with a JSON error
+// response and an appropriate HTTP status code:
+//
+//   - 401 Unauthorized if the session token is missing or invalid
+//   - 500 Internal Server Error if user or player resolution fails
+//
+// This middleware must be executed before any handlers or middleware that rely
+// on authenticated user identity or authorization, such as admin-only routes
+// or endpoints that require a resolved player.
+//
+// Note: Authentication must occur before database-backed user resolution.
+// This middleware assumes that downstream handlers will use the context values
+// rather than re-validating the session token.
 func sessionValidationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -457,7 +608,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		
 		// ---- 4. Resolve / create player ----
 		// playerDBID, err := resolveOrCreatePlayer(ctx, db, descopePlayerID)
-		playerDBID, err := resolveOrCreatePlayer(ctx, descopePlayerID)
+		// playerDBID, err := resolveOrCreatePlayer(ctx, descopePlayerID)
 
 		if err != nil {
 			log.Printf("player resolution failed: %v", err)
@@ -468,7 +619,7 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
  
 		// ---- 5. Resolve / create user ----
 		// 5️⃣ Resolve user (same pattern)
-		userDBID, username, err := resolveOrCreateUser(ctx, db, playerDBID)
+		// userDBID, username, err := resolveOrCreateUser(ctx, db, playerDBID)
 		if err != nil {
 			log.Printf("user resolution failed: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
@@ -493,8 +644,8 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, contextKeyIsAdmin, isAdmin)
 		ctx = context.WithValue(ctx, contextKeyExternalPlayerID, descopePlayerID)
 		ctx = context.WithValue(ctx, contextKeyPlayerID, playerDBID)
-		ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
-		ctx = context.WithValue(ctx, contextKeyUsername, username)
+		// ctx = context.WithValue(ctx, contextKeyUserID, userDBID)
+		// ctx = context.WithValue(ctx, contextKeyUsername, username)
  
 		// ---- 8. Continue request ----
 		next.ServeHTTP(w, r.WithContext(ctx)) 
@@ -892,16 +1043,67 @@ func generateUsername(base string, userID int) string {
 	return fmt.Sprintf("%s-%06d", base, userID%1_000_000)
 }
 
+// getMe returns the authenticated user's identity information.
+//
+// The handler requires a valid session and expects the authenticated
+// external player ID to be present in the request context (populated by
+// sessionValidationMiddleware).
+//
+// The response includes:
+//   - id: the external Descope player ID
+//   - username: the user's chosen username, or null if none has been set
+//
+// The username is resolved by joining the players and users tables. If the
+// player exists but no associated user or username is found, the username
+// field will be null. If the player record does not yet exist, the handler
+// also returns username as null.
+//
+// Error responses:
+//   - 401 Unauthorized if the request is missing authentication context
+//   - 500 Internal Server Error if a database error occurs
+//
+// Successful responses always return HTTP 200 with a JSON body containing
+// the user's ID and username.
 func getMe(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(contextKeyUserID).(int)
-	username, _ := r.Context().Value(contextKeyUsername).(string)
+	ctx := r.Context()
 
-	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
-		"user_id":     userID,
-		"username":    username,
-		"hasUsername": username != "",
+	externalID, ok := ctx.Value(contextKeyExternalPlayerID).(string)
+	if !ok || externalID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var username *string
+
+	err := db.QueryRow(`
+		SELECT u.user_name
+		FROM players p
+		LEFT JOIN users u ON u.player_id = p.id
+		WHERE p.player_id = $1
+	`, externalID).Scan(&username)
+
+	if err == sql.ErrNoRows {
+		// Player does not exist yet
+		writeJSONResponse(w, http.StatusOK, map[string]any{
+			"id":       externalID,
+			"username": nil,
+		})
+		return
+	}
+
+	if err != nil {
+		log.Printf("getMe DB error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, map[string]any{
+		"id":       externalID,
+		"username": username,
 	})
 }
+
+
 
 
 func updatePlayerProfile(w http.ResponseWriter, r *http.Request) {
