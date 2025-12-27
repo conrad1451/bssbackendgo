@@ -292,17 +292,17 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 // func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (string, error) {
 func resolveOrCreatePlayer(
 	ctx context.Context,
- 	externalPlayerID string,
+	externalPlayerID string,
 ) (int, error) {
 
 	var playerID int
 
-	err := tx.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		SELECT id FROM players WHERE player_id = $1
 	`, externalPlayerID).Scan(&playerID)
 
 	if err == sql.ErrNoRows {
-		err = tx.QueryRowContext(ctx, `
+		err = db.QueryRowContext(ctx, `
 			INSERT INTO players (player_id)
 			VALUES ($1)
 			RETURNING id
@@ -315,6 +315,7 @@ func resolveOrCreatePlayer(
 
 	return playerID, nil
 }
+
 
 
 // resolveOrCreateUser resolves the internal user record associated with a player.
@@ -448,18 +449,18 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 
 		isAdmin := descopeClient.Auth.ValidateRoles(ctx, token, []string{"Game Admin"})
 
-		// ---- 3. Begin transaction ----
-		tx, err := db.BeginTx(ctx, &sql.TxOptions{
-			Isolation: sql.LevelReadCommitted,
-		})
-		if err != nil {
-			log.Printf("Failed to begin transaction: %v", err)
-			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
+		// // ---- 3. Begin transaction ----
+		// tx, err := db.BeginTx(ctx, &sql.TxOptions{
+		// 	Isolation: sql.LevelReadCommitted,
+		// })
+		// if err != nil {
+		// 	log.Printf("Failed to begin transaction: %v", err)
+		// 	writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		// 	return
+		// }
 
-		// Ensure rollback on any failure
-		defer tx.Rollback()
+		// // Ensure rollback on any failure
+		// defer tx.Rollback()
 		
 		// ---- 4. Resolve / create player ----
 		// playerDBID, err := resolveOrCreatePlayer(ctx, db, descopePlayerID)
@@ -488,12 +489,12 @@ func sessionValidationMiddleware(next http.Handler) http.Handler {
 		}
 
 		
-		// ---- 6. Commit transaction ----
-		if err := tx.Commit(); err != nil {
-			log.Printf("Transaction commit failed: %v", err)
-			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
+		// // ---- 6. Commit transaction ----
+		// if err := tx.Commit(); err != nil {
+		// 	log.Printf("Transaction commit failed: %v", err)
+		// 	writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		// 	return
+		// }
 
 		// --- NEW CODE FOR AUTOMATIC REGISTRATION ---
         // This is where a successfully authenticated user is automatically added to the players table.
