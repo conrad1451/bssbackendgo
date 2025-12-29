@@ -1,14 +1,24 @@
+package main // Must match the package name in main.go
+import (
+	"database/sql"
+	"encoding/json"
+	"log"
+	"net/http"
+	"strconv"
+
+	"github.com/gorilla/mux"
+)
 
 // Checkpoint represents a checkpoint in the database.
-type Checkpoint struct {
-    ID        int       `json:"checkpoint_id"`
-    UserID    string    `json:"user_id"`
-    Title     string    `json:"title"`
-    Data      string    `json:"data"` // Use []byte for JSONB
-	// Data      []byte    `json:"data"` // Use []byte for JSONB
-    CreatedAt time.Time `json:"created_at"`
-    UpdatedAt time.Time `json:"updated_at"`
-}
+// type Checkpoint struct {
+//     ID        int       `json:"checkpoint_id"`
+//     UserID    string    `json:"user_id"`
+//     Title     string    `json:"title"`
+//     Data      string    `json:"data"` // Use []byte for JSONB
+// 	// Data      []byte    `json:"data"` // Use []byte for JSONB
+//     CreatedAt time.Time `json:"created_at"`
+//     UpdatedAt time.Time `json:"updated_at"`
+// }
 
 
 func getCheckpoint(w http.ResponseWriter, r *http.Request){	

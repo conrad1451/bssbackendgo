@@ -1,21 +1,20 @@
-package checkpointrepo
+package main // Must match the package name in main.go
 
 import (
 	"context"
 	"database/sql"
-	"time"
 )
 
 // Checkpoint represents a persisted game checkpoint.
-type Checkpoint struct {
-	ID        int
-	PlayerID int
-	Name      string
-	Lat       float64
-	Lng       float64
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
+// type Checkpoint struct {
+// 	ID        int
+// 	PlayerID int
+// 	Name      string
+// 	Lat       float64
+// 	Lng       float64
+// 	CreatedAt time.Time
+// 	UpdatedAt time.Time
+// }
 
 // CreateCheckpoint inserts a new checkpoint owned by the given player
 // and returns the newly created checkpoint ID.

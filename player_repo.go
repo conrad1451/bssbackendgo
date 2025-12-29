@@ -1,3 +1,8 @@
+package main // Must match the package name in main.go
+import (
+	"context"
+	"database/sql"
+)
 
 // resolveOrCreatePlayer resolves the internal player record for an authenticated user.
 //

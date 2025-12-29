@@ -1,4 +1,14 @@
- 
+package main // Must match the package name in main.go
+import (
+	"database/sql"
+	"encoding/json"
+	"log"
+	"net/http"
+	"strings"
+
+	"github.com/lib/pq"
+)
+
 // getMe returns the authenticated user's identity information.
 //
 // The handler requires a valid session and expects the authenticated
@@ -39,7 +49,7 @@
 //   - 500 Internal Server Error if a database error occurs
 //
 // Successful responses always return HTTP 200 with a JSON body containing
-// the user's ID and username. 
+// the user's ID and username.
 func getMe(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

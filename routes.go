@@ -1,3 +1,5 @@
+package main // Must match the package name in main.go
+
 // CHQ: Gemini AI generated function
 // helloHandler is the function that will be executed for requests to the "/" route.
 func helloHandler(w http.ResponseWriter, r *http.Request) {

@@ -1,3 +1,8 @@
+package main // Must match the package name in main.go
+import (
+	"context"
+	"database/sql"
+)
 
 // resolveOrCreateUser resolves the internal user record associated with a player.
 //

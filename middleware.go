@@ -1,3 +1,10 @@
+package main // Must match the package name in main.go
+import (
+	"context"
+	"log"
+	"net/http"
+	"strings"
+)
 
 // Define a custom key type to avoid collisions
 type contextKey string
