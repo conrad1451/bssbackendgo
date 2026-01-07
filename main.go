@@ -50,7 +50,7 @@ type User struct {
 var db *sql.DB
 var descopeClient *client.DescopeClient
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS", "XATA_DB_BSS"}
 
 // mustGetEnv retrieves the value of the required environment variable named by key.
 //
@@ -105,7 +105,7 @@ func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
 
 func main() {
 	// Initialize database connection
-	connStr := mustGetEnv(listOfDBConnections[4])
+	connStr := mustGetEnv(listOfDBConnections[5])
 
 	var err error
 	db, err = sql.Open("postgres", connStr)
