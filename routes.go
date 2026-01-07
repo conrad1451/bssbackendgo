@@ -1,4 +1,12 @@
 package main // Must match the package name in main.go
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+
+	"github.com/gorilla/mux"
+)
 
 // CHQ: Gemini AI generated function
 // helloHandler is the function that will be executed for requests to the "/" route.
@@ -33,8 +41,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func registerRoutes(router *mux.Router)
-{
+func registerRoutes(router *mux.Router) {
 	router.HandleFunc("/", helloHandler)
 
 	router.HandleFunc("/health", healthHandler)
