@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// CHQ: Claude AI makes function for cleanup method call between tests
+func cleanupTestData(t *testing.T) {
+    t.Helper()
+    t.Cleanup(func() {
+        db.Exec("DELETE FROM users")
+        db.Exec("DELETE FROM players")
+    })
+}
+
 func decodeJSON(t *testing.T, r io.Reader, v any) {
 	t.Helper()
 	if err := json.NewDecoder(r).Decode(v); err != nil {

@@ -40,6 +40,8 @@ func TestGetMe_NoUserYet(t *testing.T) {
 }
 
 func TestSetUsername_Success(t *testing.T) {
+	cleanupTestData(t)
+
 	externalID := "descope|user123"
 
 	playerID := insertPlayer(t, externalID)
@@ -71,6 +73,8 @@ func TestSetUsername_Success(t *testing.T) {
 }
 
 func TestSetUsername_Conflict(t *testing.T) {
+	cleanupTestData(t)
+	
 	externalID1 := "descope|userA"
 	externalID2 := "descope|userB"
 
