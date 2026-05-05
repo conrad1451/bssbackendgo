@@ -50,7 +50,7 @@ type User struct {
 var db *sql.DB
 var descopeClient *client.DescopeClient
 
-var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "IBM_DOCKER_PSQL_BSS", "XATA_DB_BSS"}
+var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "XATA_DB_BSS", "NEON_DB_BSS"}
 
 // mustGetEnv retrieves the value of the required environment variable named by key.
 //
