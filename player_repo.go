@@ -1,62 +1,60 @@
-package main // Must match the package name in main.go
+package main
+
+// CHQ: Claude AI refactored this file
+// player_repo.go
+
 import (
 	"context"
-	"database/sql"
+	"fmt"
 )
 
-// resolveOrCreatePlayer resolves the internal player record for an authenticated user.
-//
-// This function enforces the system’s identity boundary:
-//
-//   - External identity (Descope) is used ONLY for authentication
-//   - Internal identity (players.id) is used for authorization and ownership
-//
-// Behavior:
-//   - If a player row already exists for the given external Descope ID,
-//     its internal primary key (players.id) is returned.
-//   - If no such row exists, a new player row is created and its internal ID
-//     is returned.
-//
-// Invariants:
-//   - The external Descope ID is never used as a database primary key.
-//   - The returned value is always an internal integer ID.
-//   - This function must be called only after session validation succeeds.
-//
-// Parameters:
-//   - ctx: request-scoped context (must not be nil)
-//   - db: database connection
-//   - externalPlayerID: Descope-assigned user identifier (string)
-//
-// Returns:
-//   - int: internal player ID (players.id)
-//   - error: non-nil if resolution or creation fails
-//
-// Callers MUST:
-//   - Store the returned ID in request context
-//   - Use the returned ID for all authorization and ownership checks
-// func resolveOrCreatePlayer(ctx context.Context, db *sql.DB, externalPlayerID string) (string, error) {
-func resolveOrCreatePlayer(
-	ctx context.Context,
-	externalPlayerID string,
-) (int, error) {
+func getPlayerCount(ctx context.Context, userID int) (int, error) {
+    var count int
+    err := db.QueryRowContext(ctx, `
+        SELECT COUNT(*) FROM players WHERE user_id = $1
+    `, userID).Scan(&count)
+    return count, err
+}
 
-	var playerID int
+func createPlayer(ctx context.Context, userID int, playername string) (int, error) {
+    count, err := getPlayerCount(ctx, userID)
+    if err != nil {
+        return 0, err
+    }
+    if count >= 10 {
+        return 0, fmt.Errorf("player limit reached")
+    }
 
-	err := db.QueryRowContext(ctx, `
-		SELECT id FROM players WHERE player_id = $1
-	`, externalPlayerID).Scan(&playerID)
+    var playerID int
+    err = db.QueryRowContext(ctx, `
+        INSERT INTO players (user_id, playername)
+        VALUES ($1, $2)
+        RETURNING id
+    `, userID, playername).Scan(&playerID)
 
-	if err == sql.ErrNoRows {
-		err = db.QueryRowContext(ctx, `
-			INSERT INTO players (player_id)
-			VALUES ($1)
-			RETURNING id
-		`, externalPlayerID).Scan(&playerID)
-	}
+    return playerID, err
+}
 
-	if err != nil {
-		return 0, err
-	}
+func getPlayersByUser(ctx context.Context, userID int) ([]Player, error) {
+    rows, err := db.QueryContext(ctx, `
+        SELECT id, user_id, playername, created_at
+        FROM players
+        WHERE user_id = $1
+        ORDER BY created_at ASC
+    `, userID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
 
-	return playerID, nil
+    var players []Player
+    for rows.Next() {
+        var p Player
+        if err := rows.Scan(&p.ID, &p.UserID, &p.Playername, &p.CreatedAt); err != nil {
+            return nil, err
+        }
+        players = append(players, p)
+    }
+
+    return players, rows.Err()
 }

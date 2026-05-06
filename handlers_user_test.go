@@ -1,5 +1,8 @@
 package main
 
+// CHQ: Claude AI refactored this file
+// handlers_user_test.go
+
 import (
 	"bytes"
 	"context"
@@ -10,13 +13,15 @@ import (
 )
 
 func TestGetMe_NoUserYet(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	cleanupTestData(t)
 
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, "descope|test123")
+	userID := insertUser(t, "google-000000000")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	ctx := context.WithValue(req.Context(), contextKeyUserID, userID)
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
-
 	getMe(rr, req)
 
 	if rr.Code != http.StatusOK {
@@ -24,92 +29,31 @@ func TestGetMe_NoUserYet(t *testing.T) {
 	}
 
 	var resp struct {
-		ID       string  `json:"id"`
-		Username *string `json:"username"`
+		UserID   int      `json:"user_id"`
+		Username *string  `json:"username"`
+		Players  []Player `json:"players"`
 	}
-
 	decodeJSON(t, rr.Body, &resp)
 
-	if resp.ID != "descope|test123" {
-		t.Fatalf("unexpected id: %s", resp.ID)
+	if resp.UserID != userID {
+		t.Fatalf("unexpected user_id: %d", resp.UserID)
 	}
-
 	if resp.Username != nil {
 		t.Fatalf("expected username to be nil")
 	}
-}
-
-func TestSetUsername_Success(t *testing.T) {
-	cleanupTestData(t)
-
-	externalID := "descope|user123"
-
-	playerID := insertPlayer(t, externalID)
-
-	body := map[string]string{
-		"username": "coolname",
-	}
-
-	b, _ := json.Marshal(body)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, externalID)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-
-	setUsername(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-
-	username := fetchUsername(t, playerID)
-	if username != "coolname" {
-		t.Fatalf("expected username to be saved")
+	if len(resp.Players) != 0 {
+		t.Fatalf("expected no players")
 	}
 }
 
-func TestSetUsername_Conflict(t *testing.T) {
-	cleanupTestData(t)
-	
-	externalID1 := "descope|userA"
-	externalID2 := "descope|userB"
-
-	playerA := insertPlayer(t, externalID1)
-	insertUsername(t, playerA, "takenname")
-
-	insertPlayer(t, externalID2)
-
-	body := map[string]string{"username": "takenname"}
-	b, _ := json.Marshal(body)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, externalID2)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-	setUsername(rr, req)
-
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d", rr.Code)
-	}
-}
-
-// CHQ: Claude AI generated test
 func TestGetMe_WithUsername(t *testing.T) {
 	cleanupTestData(t)
 
-	externalID := "descope|withusername"
-	playerID := insertPlayer(t, externalID)
-	insertUsername(t, playerID, "myusername")
+	userID := insertUser(t, "google-111111111")
+	insertUsername(t, userID, "myusername")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, externalID)
+	ctx := context.WithValue(req.Context(), contextKeyUserID, userID)
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -120,20 +64,17 @@ func TestGetMe_WithUsername(t *testing.T) {
 	}
 
 	var resp struct {
-		ID       string  `json:"id"`
-		Username *string `json:"username"`
+		UserID   int      `json:"user_id"`
+		Username *string  `json:"username"`
+		Players  []Player `json:"players"`
 	}
 	decodeJSON(t, rr.Body, &resp)
 
-	if resp.ID != externalID {
-		t.Fatalf("unexpected id: %s", resp.ID)
-	}
 	if resp.Username == nil || *resp.Username != "myusername" {
-		t.Fatalf("expected username to be myusername, got %v", resp.Username)
+		t.Fatalf("expected username myusername, got %v", resp.Username)
 	}
 }
 
-// CHQ: Claude AI generated test
 func TestGetMe_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	rr := httptest.NewRecorder()
@@ -145,11 +86,62 @@ func TestGetMe_Unauthorized(t *testing.T) {
 	}
 }
 
-// CHQ: Claude AI generated test
+func TestSetUsername_Success(t *testing.T) {
+	cleanupTestData(t)
+
+	userID := insertUser(t, "google-222222222")
+
+	body := map[string]string{"username": "coolname"}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	ctx := context.WithValue(req.Context(), contextKeyUserID, userID)
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	setUsername(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	username := fetchUsername(t, userID)
+	if username != "coolname" {
+		t.Fatalf("expected username to be saved")
+	}
+}
+
+func TestSetUsername_Conflict(t *testing.T) {
+	cleanupTestData(t)
+
+	userA := insertUser(t, "google-333333333")
+	insertUsername(t, userA, "takenname")
+
+	userB := insertUser(t, "google-444444444")
+
+	body := map[string]string{"username": "takenname"}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	ctx := context.WithValue(req.Context(), contextKeyUserID, userB)
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	setUsername(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rr.Code)
+	}
+}
+
 func TestSetUsername_Empty(t *testing.T) {
 	cleanupTestData(t)
 
-	insertPlayer(t, "descope|emptyuser")
+	userID := insertUser(t, "google-555555555")
 
 	body := map[string]string{"username": ""}
 	b, _ := json.Marshal(body)
@@ -157,7 +149,7 @@ func TestSetUsername_Empty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, "descope|emptyuser")
+	ctx := context.WithValue(req.Context(), contextKeyUserID, userID)
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -168,12 +160,11 @@ func TestSetUsername_Empty(t *testing.T) {
 	}
 }
 
-// CHQ: Claude AI generated test
 func TestSetUsername_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/username", bytes.NewReader([]byte(`not json`)))
 	req.Header.Set("Content-Type", "application/json")
 
-	ctx := context.WithValue(req.Context(), contextKeyExternalPlayerID, "descope|anybodyuser")
+	ctx := context.WithValue(req.Context(), contextKeyUserID, 1)
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()

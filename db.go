@@ -1,10 +1,8 @@
-package main // Must match the package name in main.go
-import (
-	"context"
-	"database/sql"
-)
+package main
+
+// CHQ: Claude AI refactored this file
+// db.go
+
+import "database/sql"
 
 var db *sql.DB
-
-func resolveOrCreatePlayer(ctx context.Context, externalID string) (int, error)
-func resolveOrCreateUser(ctx context.Context, playerID int) (int, string, error)

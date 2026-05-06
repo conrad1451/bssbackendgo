@@ -1,5 +1,8 @@
 package main
 
+// CHQ: Claude AI refactored this file
+// main.go
+
 import (
 	"database/sql"
 	"encoding/json"
@@ -7,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time" // Import time package for the timestamp fields
 
 	// PostgreSQL driver
@@ -16,38 +18,39 @@ import (
 
 	// Import the handlers package for CORS middleware
 	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 )
+
+// User represents a user record in the database.
+type User struct {
+    ID        int       `json:"id"`
+    DescopeID string    `json:"descope_id"`
+    Username  *string   `json:"username"`
+    CreatedAt time.Time `json:"created_at"`
+}
+
+type Player struct {
+    ID         int       `json:"id"`
+    UserID     int       `json:"user_id"`
+    Playername *string   `json:"playername"`
+    CreatedAt  time.Time `json:"created_at"`
+}
 
 // Checkpoint represents a checkpoint in the database.
 type Checkpoint struct {
-    ID        int       `json:"checkpoint_id"`
-    UserID    string    `json:"user_id"`
+    ID        int       `json:"id"`
+    PlayerID  int       `json:"player_id"`
     Title     string    `json:"title"`
-    Data      string    `json:"data"` // Use []byte for JSONB
-	// Data      []byte    `json:"data"` // Use []byte for JSONB
+    Data      string    `json:"data"`
     CreatedAt time.Time `json:"created_at"`
     UpdatedAt time.Time `json:"updated_at"`
 }
-
-type UpdatePlayerRequest struct {
-    // FirstName string `json:"first_name"`
-    // LastName  string `json:"last_name"`
-	Username string `json:"user_name"`
-    Email     string `json:"email"`
-}
-
+ 
 type SuccessResponse struct {
     Success bool   `json:"success"`
     Message string `json:"message,omitempty"`
 }
-
-// User represents a user record in the database.
-type User struct {
-	UserID   int    `json:"user_id"`
-	Username string `json:"user_name"`
-}
-
-var db *sql.DB
+ 
 var descopeClient *client.DescopeClient
 
 var listOfDBConnections = []string{"GOOGLE_CLOUD_SQL_BSS", "AVIEN_MYSQL_DB_CONNECTION", "AVIEN_PSQL_DB_CONNECTION", "DIG_OCEAN_DROPLET_PSQL_BSS", "XATA_DB_BSS", "NEON_DB_BSS"}
@@ -103,8 +106,7 @@ func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
 
 
 
-func main() {
-	// Initialize database connection
+func main() { 
 	connStr := mustGetEnv(listOfDBConnections[5])
 
 	var err error
@@ -134,38 +136,6 @@ func main() {
 		log.Fatalf("failed to initialize Descope client: %v", err)
 	}
 
-	// // Initialize the router
-	// router := mux.NewRouter()
-
-	// // All routes now go through the mux router, including static files
-	// router.HandleFunc("/", helloHandler)
-	// router.HandleFunc("/favicon.ico", faviconHandler)
-
-	// router.HandleFunc("/health", healthHandler).Methods("GET")
-
-
-	// // Protected routes (require session validation)
-	// protectedRoutes := router.PathPrefix("/api").Subrouter()
-	// protectedRoutes.Use(sessionValidationMiddleware) // Apply middleware to all routes in this subrouter
-	// // protectedRoutes.HandleFunc("/gamecheckpoints", createCheckpoint).Methods("POST")
-	// protectedRoutes.HandleFunc("/gamecheckpoints", getAllBSSCheckpoints).Methods("GET")
-	// protectedRoutes.HandleFunc("/gamecheckpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
-
-	// // CHQ: no longer needed since /username already guarntees correctness
-	// // - Authenticated user
-	// // - Normalized username
-	// // - DB unique constraint
-	// // - Proper HTTP status codes
-	// // protectedRoutes.HandleFunc("/check-username", checkUsername).Methods("GET")
-	// protectedRoutes.HandleFunc("/username", setUsername).Methods("POST")
-	// protectedRoutes.HandleFunc("/me", getMe).Methods("GET")
-
-
-	// admin := protectedRoutes.PathPrefix("/admin").Subrouter()
-	// admin.Use(requireAdminMiddleware)
-
-	// admin.HandleFunc("/checkpoints", getAllCheckpointsAsAdmin).Methods("GET")
-
 	theOrigins := []string{
 		"https://studentfrontendreact-git-test-point-conrad1451s-projects.vercel.app",
 		"https://studentfrontendreact.vercel.app",
@@ -185,6 +155,8 @@ func main() {
 	// Create a list of allowed headers, including Content-Type
 	allowedHeaders := handlers.AllowedHeaders([]string{"Content-Type", "Authorization"})
 
+	router := mux.NewRouter()
+	registerRoutes(router)
 	// Wrap your router with the CORS handler
 	corsRouter := handlers.CORS(allowedOrigins, allowedMethods, allowedHeaders)(router)
 	// --- End of CORS Setup ---
@@ -199,132 +171,3 @@ func main() {
 	// Pass the corsRouter to ListenAndServe
 	log.Fatal(http.ListenAndServe(":"+port, corsRouter))
 }
-
-
-
-// // CHQ: Gemini AI created
-// func checkUsername(w http.ResponseWriter, r *http.Request) {
-// 	username := strings.TrimSpace(r.URL.Query().Get("username"))
-
-// 	if username == "" {
-// 		writeJSONError(w, http.StatusBadRequest, "username is required")
-// 		return
-// 	}
-
-// 	// Optional: enforce formatting rules here
-// 	if len(username) < 3 || len(username) > 20 {
-// 		writeJSONResponse(w, http.StatusOK, map[string]bool{
-// 			"available": false,
-// 		})
-// 		return
-// 	}
-
-// 	var exists bool
-// 	err := db.QueryRow(`
-// 		SELECT EXISTS (
-// 			SELECT 1
-// 			FROM players
-// 			WHERE LOWER(user_name) = LOWER($1)
-// 		)
-// 	`, username).Scan(&exists)
-
-// 	if err != nil {
-// 		log.Printf("DB error checking username: %v", err)
-// 		writeJSONError(w, http.StatusInternalServerError, "internal error")
-// 		return
-// 	}
-
-// 	writeJSONResponse(w, http.StatusOK, map[string]bool{
-// 		"available": !exists,
-// 	})
-// }
-
-
-// CHQ: Gemini AI debugged this function
-func getCheckpointOld(w http.ResponseWriter, r *http.Request) {
-	// isAdmin, _ := r.Context().Value(contextKeyIsAdmin).(bool)
-	
-	playerID, ok := r.Context().Value(contextKeyPlayerID).(string)
-	if !ok || playerID == "" {
-		writeJSONError(w, http.StatusForbidden, "Forbidden: player ID not found in session") 
-        return		 
-	}
-
-	// declared and not used: idcompilerUnusedVar
-	// vars := mux.Vars(r)
-	// checkpoint_id, err := strconv.Atoi(vars["checkpoint_id"])
-	// if err != nil {
-	// 	http.Error(w, "Invalid player ID", http.StatusBadRequest)
-	// 	return
-	// }
-
-	// CHQ: Gemini AI debugged the function call
-	thoseCheckpoints, err := GetUserCheckpoints(playerID)
-    if err != nil {
-        // If an error occurred in the database function, handle it here.
-		log.Printf("DB error retrieving checkpoints: %v",  err)
-		writeJSONError(w, http.StatusInternalServerError, "Internal server error") 
-		return
-    }
-
-	// CHQ: Gemini AI debugged the error handling
-	// Check if the user has any checkpoints and send an empty array if not.
-    if thoseCheckpoints == nil {
-        thoseCheckpoints = []Checkpoint{}
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(thoseCheckpoints)
-}
-
-// CHQ: ChatGPT generated
-func generateUsername(base string, userID int) string {
-	base = strings.ToLower(strings.TrimSpace(base))
-	if base == "" {
-		base = "player"
-	}
-	return fmt.Sprintf("%s-%06d", base, userID%1_000_000)
-}
-
-// CHQ: Gemini AI renamed from getCheckpoints to updateCheckpoint
-// func updateCheckpointALT(w http.ResponseWriter, r *http.Request) {
-//  vars := mux.Vars(r)
-//  id, err := strconv.Atoi(vars["checkpoint_id"])
-//  if err != nil {
-//      http.Error(w, "Invalid myCheckpoint ID", http.StatusBadRequest)
-//      return
-//  }
-
-//  var myCheckpoint Checkpoint
-//  err = json.NewDecoder(r.Body).Decode(&myCheckpoint)
-//  if err != nil {
-//      http.Error(w, err.Error(), http.StatusBadRequest)
-//      return
-//  }
-
-//  if myCheckpoint.ID != 0 && myCheckpoint.ID != checkpoint_id {
-//      http.Error(w, "ID in URL and request body do not match", http.StatusBadRequest)
-//      return
-//  }
-//  myCheckpoint.ID = checkpoint_id
-//     // Database automatically updates last_edited_at columns
-//  query := `UPDATE gameplay_checkpoints SET user_name = $1, checkpoint_data = $2 WHERE checkpoint_id = $3`
-//  result, err := db.Exec(query, myCheckpoint.Username, myCheckpoint.Data, myCheckpoint.ID)
-//  if err != nil {
-//      http.Error(w, fmt.Sprintf("Error updating myCheckpoint: %v", err), http.StatusInternalServerError)
-//      return
-//  }
-
-//  rowsAffected, err := result.RowsAffected()
-//  if err != nil {
-//      http.Error(w, fmt.Sprintf("Error checking rows affected: %v", err), http.StatusInternalServerError)
-//      return
-//  }
-//  if rowsAffected == 0 {
-//      http.Error(w, "Checkpoint not found or no changes made", http.StatusNotFound)
-//      return
-//  }
-
-//  w.Header().Set("Content-Type", "application/json")
-//  json.NewEncoder(w).Encode(map[string]string{"message": "Checkpoint updated successfully"})
-// }
