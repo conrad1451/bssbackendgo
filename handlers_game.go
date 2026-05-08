@@ -5,6 +5,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -231,4 +232,71 @@ func getCheckpointAsAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, http.StatusOK, cp)
+}
+
+// CHQ: created by Claude AI
+func createCheckpointHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	userID, ok := ctx.Value(contextKeyUserID).(int)
+	if !ok || userID == 0 {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	vars := mux.Vars(r)
+	playerID, err := strconv.Atoi(vars["player_id"])
+	if err != nil || playerID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid player ID")
+		return
+	}
+
+	// verify ownership
+	var exists bool
+	err = db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM players WHERE id = $1 AND user_id = $2
+		)
+	`, playerID, userID).Scan(&exists)
+	if err != nil {
+		log.Printf("createCheckpointHandler ownership check error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !exists {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	var body struct {
+		Title string          `json:"title"`
+		Data  json.RawMessage `json:"data"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	if body.Title == "" {
+		writeJSONError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	var cp Checkpoint
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO gameplay_checkpoints (player_id, title, data)
+		VALUES ($1, $2, $3)
+		RETURNING id, player_id, title, data, created_at, updated_at
+	`, playerID, body.Title, body.Data).Scan(
+		&cp.ID, &cp.PlayerID, &cp.Title, &cp.Data, &cp.CreatedAt, &cp.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Printf("createCheckpointHandler DB error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSONResponse(w, http.StatusCreated, cp)
 }
