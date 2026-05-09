@@ -51,6 +51,7 @@ func registerRoutes(router *mux.Router) {
 	protected.HandleFunc("/players/{player_id}/checkpoints", getAllBSSCheckpoints).Methods("GET")
 	protected.HandleFunc("/players/{player_id}/checkpoints/{checkpoint_id}", getCheckpoint).Methods("GET")
 	protected.HandleFunc("/players/{player_id}/checkpoints", createCheckpointHandler).Methods("POST")
+	protected.HandleFunc("/players/{player_id}/checkpoints/{checkpoint_id}", deleteCheckpointHandler).Methods("DELETE")
 
 	// admin
 	admin := protected.PathPrefix("/admin").Subrouter()

@@ -300,3 +300,71 @@ func createCheckpointHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONResponse(w, http.StatusCreated, cp)
 }
+
+
+// CHQ: Claude AI added function
+func deleteCheckpointHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	userID, ok := ctx.Value(contextKeyUserID).(int)
+	if !ok || userID == 0 {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	vars := mux.Vars(r)
+	playerID, err := strconv.Atoi(vars["player_id"])
+	if err != nil || playerID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid player ID")
+		return
+	}
+
+	checkpointID, err := strconv.Atoi(vars["checkpoint_id"])
+	if err != nil || checkpointID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid checkpoint ID")
+		return
+	}
+
+	// verify ownership
+	var exists bool
+	err = db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM players WHERE id = $1 AND user_id = $2
+		)
+	`, playerID, userID).Scan(&exists)
+	if err != nil {
+		log.Printf("deleteCheckpointHandler ownership check error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !exists {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	result, err := db.ExecContext(ctx, `
+		DELETE FROM gameplay_checkpoints
+		WHERE id = $1 AND player_id = $2
+	`, checkpointID, playerID)
+	if err != nil {
+		log.Printf("deleteCheckpointHandler DB error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("deleteCheckpointHandler rows affected error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if rowsAffected == 0 {
+		writeJSONError(w, http.StatusNotFound, "checkpoint not found")
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, SuccessResponse{
+		Success: true,
+		Message: "checkpoint deleted",
+	})
+}
